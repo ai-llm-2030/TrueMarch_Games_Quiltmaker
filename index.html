@@ -1,0 +1,2232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Quiltmaker</title>
+<!--
+  Quiltmaker (`nonogram`) — picture-logic puzzles sewn into Pinecrest's story quilt.
+  The rules engine (QuiltCoreFactory) sits between the @core markers; the puzzles sit between the
+  @data markers. In the page: window.__nonogram.selfTest().
+-->
+<style>
+  :root { --q-denim: #3f5d7d; --q-cran: #a8324a; --q-must: #d9a441; --q-sage: #7f9c6b; --q-cream: #f7f0e1; --q-cream2: #efe3c8;
+          --q-ink: #2b2320; --q-dim: #6f6253; --q-wood: #4a3022; --q-night: #1d1411; --q-line: rgba(43,35,32,.2); --q-focus: #d9a441;
+          --q-font: "Gill Sans", "Gill Sans MT", "Segoe UI", system-ui, sans-serif; }
+  html, body { margin: 0; height: 100%; background: var(--q-night); color: var(--q-ink); font: 15px/1.4 var(--q-font); overflow: hidden;
+               -webkit-tap-highlight-color: transparent; }
+  :where(.qm) button { font: inherit; color: inherit; }
+  #world { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  .scene { position: fixed; inset: 0; display: none; place-items: center; padding: 12px; box-sizing: border-box; }
+  .scene.on { display: grid; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  /* ── the house style: every dialog is a fabric patch with a running-stitch border and cross-stitched corners ── */
+  .patch { position: relative; box-sizing: border-box; color: var(--q-ink); border-radius: 14px; padding: 22px 24px;
+           background: var(--q-cream) radial-gradient(circle at 4px 4px, rgba(168,50,74,.13) 1.3px, transparent 1.8px) 0 0 / 13px 13px;
+           box-shadow: 0 14px 40px rgba(0,0,0,.5), inset 0 0 0 1px rgba(0,0,0,.12); width: min(560px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow: auto; }
+  .patch::before { content: ''; position: absolute; inset: 7px; border: 2px dashed var(--stitch, var(--q-cran)); border-radius: 9px; pointer-events: none; opacity: .7; }
+  .patch > .xs { position: absolute; width: 10px; height: 10px; pointer-events: none; }
+  .patch > .xs::before, .patch > .xs::after { content: ''; position: absolute; left: 4px; top: -1px; width: 2px; height: 12px; background: var(--stitch, var(--q-cran)); border-radius: 1px; transform: rotate(45deg); }
+  .patch > .xs::after { transform: rotate(-45deg); }
+  .xs.tl { left: 2px; top: 2px; } .xs.tr { right: 2px; top: 2px; } .xs.bl { left: 2px; bottom: 2px; } .xs.br { right: 2px; bottom: 2px; }
+  .patch.denim { --stitch: var(--q-denim); } .patch.sage { --stitch: var(--q-sage); } .patch.must { --stitch: #b07f22; }
+  .patch h2 { margin: 0 0 10px; font-size: 22px; letter-spacing: .02em; color: var(--q-wood); }
+  .patch h3 { margin: 12px 0 6px; font-size: 15px; color: var(--q-wood); }
+  .patch p { margin: 6px 0; }
+  .dim { color: var(--q-dim); }
+  .wide { width: min(1060px, calc(100vw - 24px)); height: min(600px, calc(100vh - 24px)); }
+  .cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; height: 100%; box-sizing: border-box; }
+  .cols2 > div { min-height: 0; overflow: auto; }
+
+  .btn, [role="menuitem"], [role="radio"], [role="option"], .cell-btn { cursor: pointer; border: 0; text-align: left; }
+  .btn { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 8px 16px; border-radius: 9px; font-weight: 600;
+         background: var(--q-cream2); color: var(--q-ink); box-shadow: inset 0 0 0 2px rgba(74,48,34,.25), 0 2px 0 rgba(74,48,34,.35); }
+  .btn.go { background: var(--q-cran) repeating-linear-gradient(90deg, transparent 0 6px, rgba(255,255,255,.07) 6px 7px); color: #fff8ec; box-shadow: inset 0 0 0 2px rgba(0,0,0,.2), 0 2px 0 #6e1d2f; }
+  .btn:disabled, .btn[aria-disabled="true"] { opacity: .5; cursor: default; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  :focus { outline: none; }
+  .qm :focus-visible, .qm .kbd-focus:focus { outline: 3px solid var(--q-focus) !important; outline-offset: 2px; box-shadow: 0 0 0 5px rgba(43,35,32,.6); }
+  kbd { display: inline-block; min-width: 1.5em; padding: 1px 5px; margin: 0 1px; border: 1px solid rgba(43,35,32,.35); border-bottom-width: 3px; border-radius: 5px;
+        font: 700 12px ui-monospace, Menlo, Consolas, monospace; text-align: center; background: #fffaf0; color: var(--q-ink); }
+  kbd.lit { background: var(--q-must); border-color: #8a6416; }
+
+  /* ── BACK: one place on every screen that is not live play (top right) ── */
+  .back { position: fixed; top: 10px; right: 10px; z-index: 40; display: none; min-height: 44px; min-width: 44px; padding: 6px 12px; border-radius: 10px;
+          background: var(--q-wood) repeating-linear-gradient(45deg, transparent 0 5px, rgba(255,255,255,.05) 5px 7px); color: var(--q-cream); font-weight: 700; border: 2px dashed rgba(247,240,225,.5); cursor: pointer; }
+  .back.on { display: inline-flex; align-items: center; gap: 6px; }
+  .back kbd { background: var(--q-cream); }
+
+  /* ── the title: a cabin at dusk (canvas), an embroidered banner, a column of fabric tags pinned to the frame ── */
+  #sc-title { place-items: stretch; padding: 0; pointer-events: none; }
+  #sc-title > * { pointer-events: auto; }
+  .banner { position: absolute; left: var(--ban-x, 50%); top: 14px; transform: translateX(-50%) rotate(-1.2deg); padding: 10px 34px 12px; border-radius: 6px;
+            background: var(--q-cran) repeating-linear-gradient(90deg, transparent 0 9px, rgba(0,0,0,.08) 9px 10px); color: #fff3df; text-align: center;
+            box-shadow: 0 8px 20px rgba(0,0,0,.45); white-space: nowrap; }
+  .banner::before { content: ''; position: absolute; inset: 5px; border: 2px dashed rgba(255,243,223,.7); border-radius: 4px; }
+  .banner h1 { margin: 0; font: 800 clamp(26px, 4.6vw, 46px)/1 var(--q-font); letter-spacing: .16em; text-shadow: 0 2px 0 rgba(0,0,0,.35); }
+  .banner small { display: block; margin-top: 4px; letter-spacing: .3em; font-size: 11px; opacity: .85; text-transform: uppercase; }
+  .tags { position: absolute; right: 18px; top: 50%; transform: translateY(-50%); width: 300px; display: grid; gap: 7px; max-height: calc(100vh - 40px); overflow: auto; padding: 6px 6px 6px 14px; }
+  .greet { display: flex; gap: 10px; align-items: center; color: var(--q-cream); font-size: 14px; margin-bottom: 4px; text-shadow: 0 1px 2px #000; }
+  .greet canvas { border-radius: 50%; background: var(--q-cream2); box-shadow: 0 0 0 2px var(--q-must); flex: none; }
+  .greet b { color: #fff; }
+  .tag { position: relative; display: block; width: 100%; min-height: 44px; padding: 8px 14px 8px 30px; border-radius: 4px 12px 12px 4px; box-sizing: border-box;
+         background: var(--tagc, var(--q-cream)); color: var(--q-ink); font-weight: 700; font-size: 15px;
+         box-shadow: 0 3px 0 rgba(0,0,0,.35), inset 0 0 0 1px rgba(0,0,0,.12); transform: rotate(var(--tilt, 0deg)); transition: transform .15s ease; }
+  .tag::before { content: ''; position: absolute; left: 10px; top: 50%; width: 10px; height: 10px; margin-top: -5px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #ffd9df, var(--q-cran) 60%, #5d1424); box-shadow: 1px 2px 2px rgba(0,0,0,.4); }
+  .tag::after { content: ''; position: absolute; inset: 4px 6px 4px 24px; border: 1.5px dashed rgba(43,35,32,.28); border-radius: 3px 9px 9px 3px; pointer-events: none; }
+  .tag small { display: block; font-weight: 500; font-size: 12px; color: var(--q-dim); }
+  .tag.primary { font-size: 18px; padding-top: 11px; padding-bottom: 11px; --tagc: #f3d9a4; }
+  .tag.gingham { background: repeating-linear-gradient(0deg, rgba(63,93,125,.13) 0 6px, transparent 6px 12px), repeating-linear-gradient(90deg, rgba(63,93,125,.13) 0 6px, transparent 6px 12px), var(--q-cream); }
+  .tag.cord { background: #e7ecdf repeating-linear-gradient(90deg, rgba(127,156,107,.22) 0 3px, transparent 3px 6px); }
+  .tag.dots { background: #f6e3e6 radial-gradient(circle at 3px 3px, rgba(168,50,74,.22) 1.4px, transparent 1.9px) 0 0 / 10px 10px; }
+  .tag:hover, .tag[aria-current="true"] { transform: rotate(0deg) translateX(-6px); }
+  .tag.small { min-height: 44px; font-size: 14px; }
+  .util { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .util .tag { padding-left: 26px; font-size: 13px; }
+  .controls { position: fixed; left: 14px; bottom: 10px; z-index: 6; width: min(420px, calc(100vw - 360px)); box-sizing: border-box; padding: 12px 14px; font-size: 12.5px; color: var(--q-ink);
+              background: #f3ead2 linear-gradient(transparent 0 calc(100% - 1px), rgba(63,93,125,.1) 0) 0 0 / 100% 16px; border-radius: 4px; transform: rotate(-1deg);
+              box-shadow: 0 8px 20px rgba(0,0,0,.45); border: 1px solid #c9b88f; }
+  .controls::before { content: 'PATTERN No. 1 · HOW TO SEW'; display: block; font-size: 10px; letter-spacing: .2em; color: var(--q-cran); margin-bottom: 4px; font-weight: 700; }
+  .controls div { margin: 2px 0; }
+  .controls .lnk { margin-top: 6px; min-height: 30px; padding: 2px 10px; font-size: 12px; }
+  .touch .kb-only, .no-touch .touch-only { display: none !important; }
+
+  /* ── the quilt (the map) ── */
+  .qmap { width: min(1100px, calc(100vw - 24px)); height: min(680px, calc(100vh - 24px)); display: grid; grid-template-rows: auto 1fr auto; gap: 8px; }
+  .qhead { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; padding-right: 90px; }
+  .qhead h2 { margin: 0; }
+  .qgrid { display: grid; grid-template-columns: 70px repeat(6, 1fr); grid-template-rows: repeat(4, 1fr); gap: 6px; min-height: 0; }
+  .season { display: grid; place-items: center; writing-mode: vertical-rl; transform: rotate(180deg); font-weight: 800; letter-spacing: .25em; color: #fff7e6; border-radius: 8px; font-size: 13px; text-transform: uppercase; }
+  .pt { position: relative; min-width: 0; min-height: 0; border-radius: 6px; padding: 4px; display: grid; grid-template-rows: 1fr auto; gap: 2px; background: #fbf5e7; color: var(--q-ink);
+        box-shadow: inset 0 0 0 1px rgba(0,0,0,.12), 0 2px 0 rgba(0,0,0,.18); border: 0; cursor: pointer; text-align: center; overflow: hidden; }
+  .pt::after { content: ''; position: absolute; inset: 3px; border: 1.5px dashed rgba(43,35,32,.25); border-radius: 4px; pointer-events: none; }
+  .pt canvas { width: 100%; height: 100%; min-height: 0; object-fit: contain; display: block; }
+  .pt .nm { font-size: 11.5px; font-weight: 700; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pt .rw { font-size: 11px; color: var(--q-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pt.locked { background: #e9e0cc; color: #8a7d6a; }
+  .pt.next { box-shadow: inset 0 0 0 3px var(--q-must), 0 2px 0 rgba(0,0,0,.18); }
+  .pt.boss .nm::before { content: '✶ '; color: var(--q-cran); }
+  .pt.portrait { cursor: default; background: #f1e6cf; }
+  .pt.portrait.ready { cursor: pointer; }
+  .qfoot { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--q-dim); align-items: center; }
+  .chip { display: inline-block; padding: 1px 7px; border-radius: 10px; background: rgba(168,50,74,.12); color: var(--q-cran); font-weight: 700; font-size: 11px; }
+  .chip.ok { background: rgba(127,156,107,.2); color: #3f5e2f; }
+
+  /* ── brief / settings / lists ── */
+  .brief-pic { float: right; margin: 0 0 8px 14px; width: 120px; height: 120px; border-radius: 8px; background: #fbf5e7; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
+  .facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 14px; margin: 8px 0; }
+  .facts dt { color: var(--q-dim); } .facts dd { margin: 0; font-weight: 600; }
+  .amosq { margin: 10px 0; padding: 8px 12px; border-left: 4px solid var(--q-sage); background: rgba(127,156,107,.12); border-radius: 0 8px 8px 0; font-style: italic; }
+  [role="radiogroup"] { display: flex; gap: 6px; flex-wrap: wrap; }
+  [role="radio"] { min-height: 44px; padding: 6px 14px; border-radius: 8px; background: var(--q-cream2); font-weight: 700; box-shadow: inset 0 0 0 2px rgba(74,48,34,.2); }
+  [role="radio"] small { display: block; font-weight: 500; font-size: 11.5px; color: var(--q-dim); }
+  [role="radio"][aria-checked="true"] { background: var(--q-denim); color: #fff; } [role="radio"][aria-checked="true"] small { color: #dfe8f1; }
+  .setrow { display: grid; grid-template-columns: 150px 1fr; gap: 10px; align-items: center; margin: 10px 0; }
+  .list { display: grid; gap: 6px; }
+  .list [role="option"] { display: grid; grid-template-columns: 54px 1fr auto; gap: 10px; align-items: center; min-height: 54px; padding: 4px 10px; border-radius: 8px; background: #fbf5e7; box-shadow: inset 0 0 0 1px rgba(0,0,0,.1); }
+  .list [role="option"] canvas { width: 46px; height: 46px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .stat { padding: 8px 10px; border-radius: 8px; background: #fbf5e7; box-shadow: inset 0 0 0 1px rgba(0,0,0,.1); }
+  .stat b { display: block; font-size: 22px; color: var(--q-wood); }
+
+  /* ── play: a HUD strip and a tool apron; the board itself is the canvas ── */
+  #sc-play { place-items: stretch; padding: 0; pointer-events: none; }
+  #sc-play > * { pointer-events: auto; }
+  .hudtop { position: absolute; left: 0; right: 0; top: 0; height: 46px; display: flex; align-items: center; gap: 10px; padding: 0 8px; box-sizing: border-box;
+            background: linear-gradient(rgba(43,28,20,.92), rgba(43,28,20,.78)); color: var(--q-cream); border-bottom: 2px dashed rgba(247,240,225,.25); }
+  .hudtop .nm { font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 1 1 auto; }
+  .hudtop .nm small { font-weight: 500; opacity: .8; margin-left: 6px; }
+  .spools { display: flex; gap: 2px; align-items: center; flex: none; }
+  .spool { width: 14px; height: 20px; border-radius: 3px; background: linear-gradient(90deg, #7a5233 0 3px, var(--q-cran) 3px 11px, #7a5233 11px); box-shadow: inset 0 3px 0 #a07045, inset 0 -3px 0 #a07045; }
+  .spool.gone { background: linear-gradient(90deg, #7a5233 0 3px, #3d2a20 3px 11px, #7a5233 11px); opacity: .55; }
+  .hudtop .t { font-variant-numeric: tabular-nums; flex: none; }
+  .hbtn { flex: none; min-width: 44px; min-height: 40px; border-radius: 8px; border: 1.5px dashed rgba(247,240,225,.4); background: rgba(247,240,225,.1); color: var(--q-cream); font-weight: 700; cursor: pointer; padding: 0 10px; }
+  .apron { position: absolute; right: 0; top: 46px; bottom: 0; width: 236px; box-sizing: border-box; padding: 10px; display: flex; flex-direction: column; gap: 8px; overflow: auto;
+           background: #3c271c repeating-linear-gradient(90deg, rgba(255,255,255,.035) 0 2px, transparent 2px 7px); color: var(--q-cream); border-left: 2px dashed rgba(247,240,225,.2); }
+  .apron h4 { margin: 2px 0 0; font-size: 11px; letter-spacing: .18em; text-transform: uppercase; opacity: .75; }
+  .tools { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .tbtn .lbl { font-size: 12.5px; }
+  .tbtn { min-height: 46px; border-radius: 9px; border: 0; cursor: pointer; font-weight: 800; background: rgba(247,240,225,.12); color: var(--q-cream); box-shadow: inset 0 0 0 2px rgba(247,240,225,.18); display: flex; align-items: center; justify-content: center; gap: 6px; padding: 4px 6px; }
+  .tbtn[aria-pressed="true"] { background: var(--q-cream); color: var(--q-ink); box-shadow: inset 0 0 0 3px var(--q-must); }
+  .tbtn kbd { font-size: 10px; padding: 0 4px; }
+  .pal { display: flex; gap: 6px; flex-wrap: wrap; }
+  .pal button { width: 46px; height: 46px; border-radius: 50%; border: 0; cursor: pointer; position: relative; box-shadow: inset 0 0 0 3px rgba(0,0,0,.2); }
+  .pal button[aria-pressed="true"] { box-shadow: 0 0 0 3px var(--q-cream), 0 0 0 6px var(--q-must); }
+  .pal button span { position: absolute; right: -2px; bottom: -2px; background: var(--q-cream); color: var(--q-ink); border-radius: 6px; font: 700 10px ui-monospace, monospace; padding: 0 3px; }
+  .train { display: none; } .train.on { display: block; }
+  .check { list-style: none; padding: 0; margin: 4px 0; font-size: 12.5px; display: grid; gap: 2px; }
+  .check li::before { content: '○ '; color: var(--q-must); }
+  .check li.done::before { content: '✕ '; color: var(--q-sage); font-weight: 800; }
+  .check li.done { opacity: .7; }
+  .keys { display: flex; flex-wrap: wrap; gap: 3px; }
+  .hint { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 8; display: none; align-items: center; gap: 10px; max-width: calc(100vw - 280px); padding: 8px 10px 8px 16px; border-radius: 10px;
+          background: var(--q-cream); color: var(--q-ink); box-shadow: 0 8px 20px rgba(0,0,0,.4); border: 2px dashed var(--q-must); font-weight: 600; }
+  .hint.on { display: flex; }
+  .hint button { min-height: 36px; min-width: 36px; border-radius: 8px; border: 0; background: var(--q-cream2); cursor: pointer; font-weight: 800; }
+  .toast { position: fixed; left: 50%; top: 56px; transform: translateX(-50%); z-index: 30; max-width: min(520px, calc(100vw - 24px)); padding: 8px 14px; border-radius: 10px; background: var(--q-cream); color: var(--q-ink);
+           border: 2px dashed var(--q-cran); box-shadow: 0 8px 20px rgba(0,0,0,.4); display: none; font-size: 14px; }
+  .toast.on { display: block; }
+  .toast b { color: var(--q-cran); }
+  .stamp { position: fixed; left: 50%; top: 30%; z-index: 29; transform: translate(-50%, -50%) rotate(-6deg); padding: 8px 18px; border-radius: 10px; display: none; pointer-events: none;
+           background: var(--q-sage) repeating-linear-gradient(90deg, transparent 0 7px, rgba(255,255,255,.08) 7px 8px); color: #fffbef; font-weight: 800; font-size: 20px; letter-spacing: .04em;
+           box-shadow: 0 6px 16px rgba(0,0,0,.4); border: 2px dashed rgba(255,255,255,.6); animation: stampIn .5s cubic-bezier(.2,1.6,.4,1); }
+  .stamp.on { display: block; }
+  @keyframes stampIn { from { transform: translate(-50%, -50%) rotate(-6deg) scale(1.6); } to { transform: translate(-50%, -50%) rotate(-6deg) scale(1); } }
+  .amos { position: fixed; left: 12px; bottom: 12px; z-index: 9; display: none; align-items: flex-start; gap: 10px; max-width: min(420px, calc(100vw - 24px)); padding: 10px 14px 10px 10px; border-radius: 12px;
+          background: var(--q-cream); color: var(--q-ink); box-shadow: 0 8px 22px rgba(0,0,0,.45); border: 2px dashed var(--q-sage); font-size: 14px; pointer-events: none; }
+  .amos.on { display: flex; animation: amosIn .35s ease-out; }
+  .amos canvas { flex: none; width: 46px; height: 46px; }
+  .amos b { display: block; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: #4f6b3f; }
+  body[data-scene="play"] .amos, body[data-scene="pause"] .amos { left: auto; right: 10px; bottom: 170px; max-width: 216px; font-size: 13px; }
+  body[data-scene="play"] .amos canvas { width: 34px; height: 34px; }
+  @media (max-width: 899px) { body[data-scene="play"] .amos, body[data-scene="pause"] .amos { right: auto; left: 50%; transform: translateX(-50%); top: 50px; bottom: auto; max-width: min(420px, calc(100vw - 24px)); } }
+  body[data-scene="title"] .amos { left: auto; right: 340px; bottom: 16px; }
+  @media (max-width: 760px) { body[data-scene="title"] .amos { right: 12px; left: 12px; bottom: auto; top: 108px; } }
+  @media (max-height: 500px) and (min-width: 761px) { body[data-scene="title"] .amos { right: 8px; bottom: 8px; max-width: 320px; } .controls { font-size: 11px; width: 300px; padding: 8px 10px; left: 8px; bottom: 8px; } .controls::before { display: none; } }
+  @keyframes amosIn { from { transform: translateY(14px); } to { transform: none; } }
+
+  /* ── results (Patch Sewn): wide; the summary on the left, your own patch on the right ── */
+  .pic { width: 100%; max-width: 260px; aspect-ratio: 1; display: block; margin: 0 auto 8px; border-radius: 8px; background: #fbf5e7; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
+  .seal { display: inline-block; padding: 3px 10px; border-radius: 6px; background: var(--q-sage); color: #fff; font-weight: 800; transform: rotate(-3deg); }
+  .goodlist { margin: 6px 0; padding-left: 18px; }
+  .goodlist li { margin: 2px 0; }
+
+  /* ── How to sew: a lesson with a live demo per row ── */
+  .lesson { display: grid; grid-template-columns: minmax(230px, 1fr) 1.2fr; gap: 18px; height: 100%; min-height: 0; }
+  .lesson [role="listbox"] { overflow: auto; display: grid; gap: 4px; align-content: start; min-height: 0; }
+  .lesson .grp { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: var(--q-cran); font-weight: 800; margin: 6px 0 0; }
+  .lesson [role="option"] { min-height: 44px; padding: 6px 10px; border-radius: 8px; background: #fbf5e7; box-shadow: inset 0 0 0 1px rgba(0,0,0,.1); display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+  .lesson [role="option"][aria-selected="true"] { background: #f3d9a4; box-shadow: inset 0 0 0 2px #b07f22; }
+  .demo { display: grid; grid-template-rows: 1fr auto auto; gap: 8px; min-height: 0; }
+  .demo canvas { width: 100%; height: 100%; min-height: 160px; border-radius: 10px; background: #e8dcc0; }
+  .demo .cap { font-weight: 600; min-height: 2.6em; }
+
+  .card-prev { width: 100%; max-height: calc(100vh - 220px); object-fit: contain; display: block; margin: 0 auto; border-radius: 6px; box-shadow: 0 6px 16px rgba(0,0,0,.3); }
+
+  /* ── narrow rooms ── */
+  @media (max-width: 760px) {
+    .tags { left: 10px; right: 10px; width: auto; top: auto; bottom: 10px; transform: none; max-height: 52vh; padding-left: 10px; }
+    .controls { display: none; }
+    .banner { top: 50px; padding: 6px 20px 8px; } .banner small { display: none; }
+    .qgrid { grid-template-columns: 26px repeat(6, 1fr); gap: 3px; }
+    .season { font-size: 10px; letter-spacing: .1em; }
+    .pt .rw { display: none; } .pt .nm { font-size: 9.5px; }
+    .cols2 { grid-template-columns: 1fr; height: auto; }
+    .wide { height: auto; }
+    .lesson { grid-template-columns: 1fr; }
+    .lesson [role="listbox"] { max-height: 34vh; }
+    .demo canvas { height: 200px; }
+    .setrow { grid-template-columns: 1fr; gap: 4px; }
+    .hint { max-width: calc(100vw - 24px); bottom: auto; top: 54px; }
+  }
+  .apron.bottom { left: 0; right: 0; top: auto; width: auto; height: auto; max-height: 45vh; flex-direction: row; flex-wrap: wrap; align-content: flex-start; border-left: 0; border-top: 2px dashed rgba(247,240,225,.2); padding: 5px 4px; gap: 4px; }
+  .apron.bottom .tools { order: 1; } .apron.bottom .pal { order: 3; }
+  .apron.bottom h4, .apron.bottom .train { display: none; }
+  .apron.bottom .tools { grid-template-columns: repeat(3, 44px); gap: 4px; } .apron.bottom .tbtn { min-height: 44px; padding: 2px; }
+  .apron.bottom .tbtn span.lbl { display: none; }
+  .apron.bottom .pal button { width: 44px; height: 44px; }
+  .apron.side-narrow { width: 200px; padding: 6px; gap: 5px; }
+  .apron.side-narrow h4, .apron.side-narrow .train, .apron.side-narrow .tbtn span.lbl { display: none; }
+  .apron.side-narrow .pal button { width: 40px; height: 40px; }
+
+  /* ── motion off: the OS switch or the Settings switch (html[data-motion="reduced"]) ── */
+  @media (prefers-reduced-motion: reduce) {
+    .qm *, .qm *::before, .qm *::after { animation: none !important; transition: none !important; }
+  }
+  html[data-motion="reduced"] .qm *, html[data-motion="reduced"] .qm *::before, html[data-motion="reduced"] .qm *::after { animation: none !important; transition: none !important; }
+</style>
+</head>
+<body class="qm no-touch">
+<canvas id="world" aria-hidden="true"></canvas>
+<button class="back" id="back" aria-label="Back (Esc)">BACK <kbd>Esc</kbd></button>
+
+<section class="scene" id="sc-title" aria-labelledby="ttl">
+  <div class="banner" id="banner"><h1 id="ttl">QUILTMAKER</h1><small>The story quilt of Pinecrest</small></div>
+  <nav class="tags" id="tags" aria-label="Main menu">
+    <div class="greet" id="greet"></div>
+    <div role="menu" id="menu" aria-label="Main menu" style="display:grid;gap:7px"></div>
+  </nav>
+</section>
+<div class="controls" id="controlsCard">
+  <div class="kb-only"><kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd> move the needle · <kbd>Space</kbd> stitch · <kbd>X</kbd> pin</div>
+  <div class="kb-only">hold <kbd>Space</kbd>/<kbd>X</kbd> + arrows: a whole run · <kbd>1</kbd>–<kbd>4</kbd> thread colour · <kbd>Z</kbd> unpick</div>
+  <div class="kb-only">mouse: left stitch, right pin, drag a run</div>
+  <div class="touch-only">Tap or drag to stitch · long-press or the <b>Pin</b> button to pin · the palette picks the thread · ↶ unpicks</div>
+  <div><kbd>Esc</kbd> menu · <kbd>P</kbd> pause · <kbd>M</kbd> mute</div>
+  <button class="btn lnk" id="seeIt">See it in action</button>
+</div>
+
+<section class="scene" id="sc-quilt" aria-labelledby="qttl" role="dialog" aria-modal="true">
+  <div class="patch qmap denim">
+    <div class="qhead"><h2 id="qttl">The Story Quilt</h2><span class="dim" id="qprog"></span></div>
+    <div class="qgrid" id="qgrid" role="grid" aria-label="Patches of the quilt"></div>
+    <div class="qfoot" id="qfoot"></div>
+  </div>
+</section>
+
+<section class="scene" id="sc-brief" role="dialog" aria-modal="true" aria-labelledby="bttl">
+  <div class="patch" id="briefBox">
+    <canvas class="brief-pic" id="briefPic" width="240" height="240" aria-hidden="true"></canvas>
+    <h2 id="bttl"></h2>
+    <div class="dim" id="bsub"></div>
+    <dl class="facts" id="bfacts"></dl>
+    <div class="amosq" id="bamos"></div>
+    <h3 id="diffLbl">How snug a stitch?</h3>
+    <div role="radiogroup" aria-labelledby="diffLbl" id="diffs"></div>
+    <div id="midRow" class="row"></div>
+    <div class="row"><button class="btn go" id="bgo">Start stitching</button><span class="dim" id="bnote"></span></div>
+  </div>
+</section>
+
+<section class="scene" id="sc-play" aria-label="Sewing">
+  <div class="hudtop" id="hudTop">
+    <button class="hbtn" id="hPause" aria-label="Pause (P)">❚❚</button>
+    <div class="nm" id="hName"></div>
+    <div class="spools" id="hThread" aria-label="Thread"></div>
+    <div class="t" id="hPrick" title="Pinpricks"></div>
+    <div class="t" id="hTime"></div>
+  </div>
+  <div class="apron" id="apron">
+    <h4>Needle</h4>
+    <div class="tools">
+      <button class="tbtn" id="tStitch" aria-pressed="true" aria-label="Stitch tool"><span aria-hidden="true">▣</span><span class="lbl">Stitch</span></button>
+      <button class="tbtn" id="tPin" aria-pressed="false" aria-label="Pin tool"><span aria-hidden="true">✕</span><span class="lbl">Pin</span></button>
+      <button class="tbtn" id="tUndo" aria-label="Unpick the last stitch (Z)"><span aria-hidden="true">↶</span><span class="lbl">Unpick</span></button>
+    </div>
+    <h4 id="palH">Thread</h4>
+    <div class="pal" id="pal" role="group" aria-label="Thread colour"></div>
+    <div class="train" id="trainBox">
+      <h4>Scrap Table checklist</h4>
+      <ul class="check" id="checklist"></ul>
+      <div class="keys" id="keyshow" aria-hidden="true"></div>
+    </div>
+  </div>
+  <div class="hint" id="hint" role="note"><span id="hintText"></span><button id="hintSkip" aria-label="Skip this tip">✕</button></div>
+</section>
+
+<section class="scene" id="sc-pause" role="dialog" aria-modal="true" aria-labelledby="pttl">
+  <div class="patch sage" style="width:min(360px,calc(100vw - 24px))"><h2 id="pttl">Needle down</h2><p class="dim" id="pinfo"></p><div role="menu" id="pmenu" aria-label="Pause menu" style="display:grid;gap:7px"></div></div>
+</section>
+
+<section class="scene" id="sc-tally" role="dialog" aria-modal="true" aria-labelledby="rttl">
+  <div class="patch wide must">
+    <div class="cols2">
+      <div><h2 id="rttl">Patch Sewn</h2><div class="dim" id="rsub"></div><div class="amosq" id="ramos" style="display:none"></div><div id="rmine"></div></div>
+      <div>
+        <canvas class="pic" id="rpic" width="520" height="520" aria-hidden="true"></canvas>
+        <div class="row" id="rbtns"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="scene" id="sc-lost" role="dialog" aria-modal="true" aria-labelledby="lttl">
+  <div class="patch" style="width:min(520px,calc(100vw - 24px))">
+    <h2 id="lttl">The patch unravelled</h2>
+    <p id="lcause"></p><p class="dim" id="ltip"></p>
+    <div class="amosq" id="lamos"></div>
+    <div role="menu" id="lmenu" aria-label="What next" style="display:grid;gap:7px"></div>
+  </div>
+</section>
+
+<section class="scene" id="sc-how" role="dialog" aria-modal="true" aria-labelledby="httl">
+  <div class="patch wide sage">
+    <div class="lesson">
+      <div style="display:flex;flex-direction:column;min-height:0"><h2 id="httl">How to sew</h2><div role="listbox" id="lessonList" aria-label="Controls"></div></div>
+      <div class="demo"><canvas id="demoCv" aria-hidden="true"></canvas><div class="cap" id="demoCap" aria-live="polite"></div><div class="row" style="margin:0"><button class="btn go" id="tryIt">Try it at the Scrap Table</button></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="scene" id="sc-free" role="dialog" aria-modal="true" aria-labelledby="fttl">
+  <div class="patch denim" style="width:min(620px,calc(100vw - 24px))"><h2 id="fttl">Free sewing</h2><p class="dim">Any patch you have sewn, again, just for the joy of it. Nothing counts against you.</p><div class="list" role="listbox" id="freeList" aria-label="Sewn patches"></div></div>
+</section>
+
+<section class="scene" id="sc-stats" role="dialog" aria-modal="true" aria-labelledby="sttl">
+  <div class="patch" style="width:min(680px,calc(100vw - 24px))"><h2 id="sttl">Your sewing</h2><div class="stats" id="statBox"></div><h3>Best times</h3><div id="bestBox" class="dim"></div></div>
+</section>
+
+<section class="scene" id="sc-settings" role="dialog" aria-modal="true" aria-labelledby="settl">
+  <div class="patch sage" style="width:min(600px,calc(100vw - 24px))"><h2 id="settl">Settings</h2><div id="setBox"></div></div>
+</section>
+
+<section class="scene" id="sc-card" role="dialog" aria-modal="true" aria-labelledby="cttl">
+  <div class="patch must" style="width:min(560px,calc(100vw - 24px))"><h2 id="cttl">Quilt Card</h2><img class="card-prev" id="cardImg" alt=""><div class="row"><button class="btn go" id="cardSave">Save as a picture</button><span class="dim">Saved on this device only — nothing is sent.</span></div></div>
+</section>
+
+<div class="toast" id="toast" role="status"></div>
+<div class="stamp" id="stamp" aria-hidden="true"></div>
+<div class="amos" id="amos" aria-hidden="true"><canvas id="amosFace" width="92" height="92"></canvas><div><b>Grandpa Amos</b><span id="amosText"></span></div></div>
+<div class="sr" aria-live="polite" id="live"></div>
+
+<script>
+/*@core-begin*/
+function QuiltCoreFactory() {
+  'use strict';
+  /* Cell knowledge is a bit mask: bit 0 = empty, bit c = colour c (1..k). A cell is known when one bit is left. */
+  var BIT = [1, 2, 4, 8, 16, 32];
+  function full(k) { return (1 << (k + 1)) - 1; }
+  function one(m) { return m && !(m & (m - 1)); }
+  function val(m) { for (var c = 0; c < 6; c++) if (m === BIT[c]) return c; return -1; }
+
+  /* A puzzle as stored: {id, name, pal:[hex...], art:'row|row', g:[given cells], f:[faded lines]}. */
+  function parse(def) {
+    var rows = def.art.split('|'), h = rows.length, w = rows[0].length, k = def.pal.length;
+    var cells = new Int8Array(w * h), filled = 0;
+    for (var y = 0; y < h; y++) {
+      if (rows[y].length !== w) throw new Error(def.id + ': row ' + y + ' is ' + rows[y].length + ' wide, not ' + w);
+      for (var x = 0; x < w; x++) {
+        var ch = rows[y].charCodeAt(x), v = ch === 46 ? 0 : ch - 96;
+        if (v < 0 || v > k) throw new Error(def.id + ': bad cell "' + rows[y][x] + '" at ' + x + ',' + y);
+        cells[y * w + x] = v; if (v) filled++;
+      }
+    }
+    return { id: def.id, name: def.name, w: w, h: h, k: k, pal: def.pal.slice(), cells: cells, filled: filled,
+      givens: (def.g || []).slice(), faded: (def.f || []).slice(), def: def };
+  }
+  /* Line l: rows are 0..h-1, columns are h..h+w-1. */
+  function lineCells(p, l) {
+    var out = [];
+    if (l < p.h) for (var x = 0; x < p.w; x++) out.push(l * p.w + x);
+    else for (var y = 0; y < p.h; y++) out.push(y * p.w + (l - p.h));
+    return out;
+  }
+  function clueOf(vals) {
+    var ns = [], cs = [], i = 0, L = vals.length;
+    while (i < L) {
+      var v = vals[i];
+      if (!v) { i++; continue; }
+      var j = i; while (j < L && vals[j] === v) j++;
+      ns.push(j - i); cs.push(v); i = j;
+    }
+    return { n: ns, c: cs };
+  }
+  function clues(p) {
+    var out = [];
+    for (var l = 0; l < p.h + p.w; l++) {
+      var idx = lineCells(p, l), vals = idx.map(function (i) { return p.cells[i]; });
+      out.push(clueOf(vals));
+    }
+    return out;
+  }
+  function check(p, i, v) { return p.cells[i] === v; }
+
+  /* The line solver: every arrangement of the clue's runs that fits what is known, folded into what each cell can
+     still be. Forward and backward reachability over (cell, runs placed, last cell empty | run just ended) — a DP of
+     O(L * runs * colours). Runs of the same colour need a gap; different colours may touch. Returns the narrowed
+     masks, or null when nothing fits (a contradiction). */
+  function solveLine(clue, m, k) {
+    var L = m.length, B = clue.n.length, ns = clue.n, cs = clue.c, S = B + 1, c, i, j;
+    var bad = new Int16Array((k + 1) * (L + 1));
+    for (c = 0; c <= k; c++) for (i = 0; i < L; i++) bad[c * (L + 1) + i + 1] = bad[c * (L + 1) + i] + ((m[i] & BIT[c]) ? 0 : 1);
+    function ok(i, n, c) { return i + n <= L && bad[c * (L + 1) + i + n] === bad[c * (L + 1) + i]; }
+    var FE = new Uint8Array((L + 1) * S), FB = new Uint8Array((L + 1) * S), RE = new Uint8Array((L + 2) * S), RB = new Uint8Array((L + 2) * S);
+    FE[0] = 1;
+    for (i = 0; i <= L; i++) for (j = 0; j <= B; j++) {
+      var e = FE[i * S + j], b = FB[i * S + j];
+      if (!e && !b) continue;
+      if (i < L && (m[i] & 1)) FE[(i + 1) * S + j] = 1;
+      if (j < B && ok(i, ns[j], cs[j]) && (e || (b && cs[j - 1] !== cs[j]))) FB[(i + ns[j]) * S + j + 1] = 1;
+    }
+    if (!FE[L * S + B] && !FB[L * S + B]) return null;
+    for (i = L; i >= 0; i--) for (j = B; j >= 0; j--) {
+      if (i === L) { RE[i * S + j] = RB[i * S + j] = j === B ? 1 : 0; continue; }
+      var en = (m[i] & 1) && RE[(i + 1) * S + j] ? 1 : 0;
+      var pl = j < B && ok(i, ns[j], cs[j]) && RB[(i + ns[j]) * S + j + 1] ? 1 : 0;
+      RE[i * S + j] = en || pl ? 1 : 0;
+      RB[i * S + j] = en || (pl && j > 0 && cs[j - 1] !== cs[j]) || (pl && j === 0) ? 1 : 0;
+    }
+    var out = new Uint8Array(L), diff = new Int16Array((k + 1) * (L + 1));
+    for (i = 0; i < L; i++) for (j = 0; j <= B; j++) {
+      var fe = FE[i * S + j], fb = FB[i * S + j];
+      if (!fe && !fb) continue;
+      if ((m[i] & 1) && RE[(i + 1) * S + j]) out[i] |= 1;
+      if (j < B) {
+        var n = ns[j]; c = cs[j];
+        if (ok(i, n, c) && (fe || (fb && cs[j - 1] !== c)) && RB[(i + n) * S + j + 1]) { diff[c * (L + 1) + i]++; diff[c * (L + 1) + i + n]--; }
+      }
+    }
+    for (c = 1; c <= k; c++) { var run = 0; for (i = 0; i < L; i++) { run += diff[c * (L + 1) + i]; if (run > 0) out[i] |= BIT[c]; } }
+    for (i = 0; i < L; i++) if (!out[i]) return null;
+    return out;
+  }
+
+  /* Knowledge masks for a whole grid: everything open, then the givens. */
+  function blank(p) {
+    var g = new Uint8Array(p.w * p.h).fill(full(p.k));
+    p.givens.forEach(function (i) { g[i] = BIT[p.cells[i]]; });
+    return g;
+  }
+  function lineDone(p, g, l) { var idx = lineCells(p, l); for (var t = 0; t < idx.length; t++) if (!one(g[idx[t]])) return false; return true; }
+
+  /* Line logic to a fixpoint, no guessing. opts.faded: lines whose clue is hidden until a crossing line is done.
+     Returns {solved, ok (matches the picture), grid, passes, first[line] (the pass a line first gave something),
+     contradiction}. */
+  function solve(p, opts) {
+    opts = opts || {};
+    var g = opts.grid ? Uint8Array.from(opts.grid) : blank(p), CL = opts.clues || clues(p), NL = p.h + p.w;
+    var faded = {}; (opts.faded || []).forEach(function (l) { faded[l] = 1; });
+    var dirty = new Uint8Array(NL).fill(1), first = new Int16Array(NL), passes = 0, changed = true, contra = false;
+    var idxs = []; for (var l = 0; l < NL; l++) idxs.push(lineCells(p, l));
+    while (changed && !contra) {
+      changed = false; passes++;
+      for (l = 0; l < NL; l++) {
+        if (faded[l]) {
+          var lift = false, cross = l < p.h ? [p.h, p.h + p.w] : [0, p.h];
+          for (var x = cross[0]; x < cross[1] && !lift; x++) if (lineDone(p, g, x)) lift = true;
+          if (!lift) continue;
+          delete faded[l]; dirty[l] = 1;
+        }
+        if (!dirty[l]) continue;
+        dirty[l] = 0;
+        var idx = idxs[l], m = new Uint8Array(idx.length);
+        for (var t = 0; t < idx.length; t++) m[t] = g[idx[t]];
+        var r = solveLine(CL[l], m, p.k);
+        if (!r) { contra = true; break; }
+        for (t = 0; t < idx.length; t++) if (r[t] !== m[t]) {
+          g[idx[t]] = r[t]; changed = true;
+          if (!first[l]) first[l] = passes;
+          var other = l < p.h ? p.h + (idx[t] % p.w) : Math.floor(idx[t] / p.w);
+          dirty[other] = 1;
+        }
+      }
+      if (opts.maxPasses && passes >= opts.maxPasses) break;
+    }
+    var solved = !contra, okp = !contra;
+    for (var i = 0; i < g.length; i++) { if (!one(g[i])) solved = false; else if (val(g[i]) !== p.cells[i]) okp = false; }
+    return { solved: solved, ok: solved && okp, grid: g, passes: passes, first: first, contradiction: contra };
+  }
+
+  /* How hard: passes to the fixpoint; knotted = share of lines that gave nothing until a crossing line had;
+     tangled = share of lines whose runs are mostly 1s and 2s (they resist overlap). */
+  function rate(p) {
+    var s = solve(p, { faded: p.faded }), CL = clues(p), NL = p.h + p.w, knot = 0, tang = 0, hard = 0, hardL = -1;
+    for (var l = 0; l < NL; l++) {
+      if (s.first[l] >= 2) knot++;
+      if (s.first[l] > hard) { hard = s.first[l]; hardL = l; }
+      var ns = CL[l].n, small = 0; ns.forEach(function (n) { if (n <= 2) small++; });
+      if (ns.length >= 3 && small * 2 >= ns.length) tang++;
+    }
+    return { solved: s.ok, passes: s.passes, knotted: +(knot / NL).toFixed(2), tangled: +(tang / NL).toFixed(2), hardest: hardL, hardPass: hard,
+      cells: p.w * p.h, givens: p.givens.length, faded: p.faded.length };
+  }
+
+  /* Givens: while line logic stalls, pin down the truth of the most tangled open cell (most open cells across its
+     row and column). Deterministic. */
+  function addGivens(p, cap) {
+    p.givens = []; var guard = 0;
+    for (;;) {
+      var s = solve(p);
+      if (s.ok) return p.givens;
+      if (s.contradiction || ++guard > (cap || 400)) return null;
+      var best = -1, bs = -1;
+      for (var i = 0; i < s.grid.length; i++) {
+        if (one(s.grid[i])) continue;
+        var x = i % p.w, y = (i / p.w) | 0, sc = 0;
+        for (var t = 0; t < p.w; t++) if (!one(s.grid[y * p.w + t])) sc++;
+        for (t = 0; t < p.h; t++) if (!one(s.grid[t * p.w + x])) sc++;
+        sc = sc * 4 + (p.cells[i] ? 1 : 0);
+        if (sc > bs) { bs = sc; best = i; }
+      }
+      p.givens.push(best);
+    }
+  }
+  /* Faded clues: take candidate lines in order, keep each one the puzzle still solves with. */
+  function pickFaded(p, share, seed) {
+    var NL = p.h + p.w, want = Math.max(1, Math.round(NL * share)), cand = [], r = seed >>> 0 || 1;
+    for (var l = 0; l < NL; l++) cand.push(l);
+    for (var i = NL - 1; i > 0; i--) { r = (r * 1103515245 + 12345) >>> 0; var j = r % (i + 1), t = cand[i]; cand[i] = cand[j]; cand[j] = t; }
+    var keep = [];
+    for (i = 0; i < cand.length && keep.length < want; i++) {
+      var tryF = keep.concat([cand[i]]);
+      if (solve(p, { faded: tryF }).ok) keep.push(cand[i]);
+    }
+    return keep;
+  }
+
+  /* What can be proved now from what the player knows: for each line, the cells line logic settles that the player
+     has not. `know` is the masks of the player's knowledge (always consistent with the picture). */
+  function proofs(p, know, CL, faded) {
+    CL = CL || clues(p);
+    var out = [];
+    for (var l = 0; l < p.h + p.w; l++) {
+      if (faded && faded[l]) continue;
+      var idx = lineCells(p, l), m = new Uint8Array(idx.length), n = 0;
+      for (var t = 0; t < idx.length; t++) m[t] = know[idx[t]];
+      var r = solveLine(CL[l], m, p.k); if (!r) continue;
+      var cells = [];
+      for (t = 0; t < idx.length; t++) if (r[t] !== m[t] && one(r[t])) cells.push({ i: idx[t], v: val(r[t]) });
+      if (cells.length) out.push({ line: l, cells: cells });
+    }
+    return out;
+  }
+
+  /* Mirror and/or recolour (Midnight Sewing). Line logic survives a mirror, so givens just move with it. */
+  function transform(def, o) {
+    var rows = def.art.split('|'), w = rows[0].length;
+    var art = o.mirror ? rows.map(function (r) { return r.split('').reverse().join(''); }).join('|') : def.art;
+    var g = (def.g || []).map(function (i) { var x = i % w, y = (i / w) | 0; return o.mirror ? y * w + (w - 1 - x) : i; });
+    var f = (def.f || []).map(function (l) { var h = rows.length; return o.mirror && l >= h ? h + (w - 1 - (l - h)) : l; });
+    return { id: def.id + (o.mirror ? 'm' : ''), name: def.name, pal: o.pal || def.pal, art: art, g: g, f: f };
+  }
+
+  /* A portrait patch: a picture, sampled to size x size and quantised to an act's fabric palette.
+     img = {width, height, data (RGBA)}; palette = ['#hex', ...]; index 0 is the background (transparent pixels). */
+  function portraitPatch(img, palette, size) {
+    size = size || 24;
+    var P = palette.map(function (h) { var v = parseInt(h.slice(1), 16); return [v >> 16 & 255, v >> 8 & 255, v & 255]; });
+    var out = new Uint8Array(size * size), W = img.width, H = img.height, d = img.data;
+    for (var y = 0; y < size; y++) for (var x = 0; x < size; x++) {
+      var x0 = Math.floor(x * W / size), x1 = Math.max(x0 + 1, Math.floor((x + 1) * W / size));
+      var y0 = Math.floor(y * H / size), y1 = Math.max(y0 + 1, Math.floor((y + 1) * H / size));
+      var r = 0, g = 0, b = 0, a = 0, n = 0;
+      for (var yy = y0; yy < y1; yy++) for (var xx = x0; xx < x1; xx++) { var o = (yy * W + xx) * 4, al = d[o + 3] / 255; r += d[o] * al; g += d[o + 1] * al; b += d[o + 2] * al; a += al; n++; }
+      if (a / n < 0.45) { out[y * size + x] = 0; continue; }
+      r /= a; g /= a; b /= a;
+      var best = 1, bd = 1e9;
+      for (var c = 1; c < P.length; c++) { var dr = r - P[c][0], dg = g - P[c][1], db = b - P[c][2], dd = dr * dr * 0.3 + dg * dg * 0.59 + db * db * 0.11; if (dd < bd) { bd = dd; best = c; } }
+      out[y * size + x] = best;
+    }
+    return out;
+  }
+
+  return { BIT: BIT, full: full, one: one, val: val, parse: parse, lineCells: lineCells, clueOf: clueOf, clues: clues, check: check,
+    solveLine: solveLine, blank: blank, solve: solve, rate: rate, addGivens: addGivens, pickFaded: pickFaded, proofs: proofs,
+    transform: transform, portraitPatch: portraitPatch, lineDone: lineDone };
+}
+/*@core-end*/
+/*@data-begin*/
+var PUZ = [
+{"id":"m1a","name":"Heart","pal":["#a8324a"],"art":".a.a.|aaaaa|aaaaa|.aaa.|..a..","g":[],"f":[]},
+{"id":"m1b","name":"Tulip","pal":["#a8324a"],"art":"a.a.a|aaaaa|.aaa.|a.a.a|.aaa.","g":[],"f":[]},
+{"id":"m1c","name":"Little House","pal":["#3f5d7d"],"art":"..a..|.aaa.|aaaaa|.a.a.|.a.aa","g":[],"f":[]},
+{"id":"m2a","name":"The Well","pal":["#3f5d7d"],"art":"...aa...|..aaaa..|.aaaaaa.|.a....a.|.a..a.a.|aaaaaaaa|a.a.a.aa|aaaaaaaa","g":[],"f":[]},
+{"id":"m2b","name":"Bucket","pal":["#3f5d7d"],"art":"..aaaa..|.a....a.|a......a|aaaaaaaa|.aaaaaa.|.a.aa.a.|.aaaaaa.|..aaaa..","g":[2],"f":[]},
+{"id":"m3","name":"Spring Lamb","pal":["#7f9c6b"],"art":"......aaa.|.aaa.aaaaa|aaaaaaa.aa|aaaaaaaaaa|aaaaaaaaa.|.aaaaaaa..|.a.a..a.a.|.a.a..a.a.|.a.a..a.a.|aaaaaaaaaa","g":[],"f":[]},
+{"id":"m4","name":"Bee & Clover","pal":["#7f9c6b"],"art":"........a.|.......aaa|..aa.aa.a.|.aaaaaaa..|.aaaaaaa..|..aaaaa...|.aaaaaaa..|.aaa.aaa..|....a.....|...a......","g":[],"f":[]},
+{"id":"m5","name":"The Old Mill","pal":["#3f5d7d"],"art":"a..........a|.aa......aa.|..aa....aa..|...aa..aa...|....aaaa....|...aaaaaa...|..aa.aa.aa..|.aa.aaaa.aa.|a...aaaa...a|...aaaaaa...|...aa..aa...|aaaaaaaaaaaa","g":[],"f":[]},
+{"id":"m6","name":"Strawberries","pal":["#7f9c6b","#a8324a"],"art":"....a.....|..aaaaa...|.aabbbaa..|.bbbbbbb..|bbb.bbbbb.|bbbbbb.bb.|.bb.bbbb..|.bbbbbbb..|..bbb.b...|...bbb....","g":[],"f":[]},
+{"id":"m7","name":"Swimming Hole","pal":["#7f9c6b","#3f5d7d"],"art":"aa......aa|aaa....aaa|aaaa..aaaa|aabbbbbbaa|abbbbbbbba|abbb.bbbba|abbbbbbbba|aabbbbbbaa|aaabbbbaaa|aaaaaaaaaa","g":[],"f":[]},
+{"id":"m8","name":"Sunflowers","pal":["#d9a441","#56602f"],"art":"....a..a....|..a.aaaa.a..|..aaaaaaaa..|.aaabbbbaaa.|aaabbbbbbaaa|.aabbbbbbaa.|aaabbbbbbaaa|.aaabbbbaaa.|..a.aaaa.a..|......b.....|.bbb..b.bbb.|...bbbbbb...","g":[],"f":[]},
+{"id":"m9","name":"Fiddle at Dusk","pal":["#d9762b","#3a2e2a"],"art":".....bb.....|.....bb.....|.....ab.....|.....ab.....|...aaabaa...|..aaaabaaa..|...aaabaa...|....aabaa...|..aaaabaaa..|.aaaaabaaaa.|.aaaabbbaaa.|..aaaaaaaa..","g":[],"f":[]},
+{"id":"m10","name":"The Summer Fair","pal":["#a8324a","#d9a441"],"art":".......b.......|.......bb......|.......a.......|......aba......|.....aabaa.....|....babbbab....|...bbabbbabb...|..abbabbbabba..|.aabbabbbabbaa.|..abbab.babba..|..abbab.babba..|..abba...abba..|..abba...abba..|..aaaaaaaaaaa..|b.b.b.b.b.b.b.b","g":[],"f":[]},
+{"id":"m11","name":"Apple Picking","pal":["#7f9c6b","#a8324a","#7a5233"],"art":"...aaaaaa...|.aaabaaaaaa.|aaaaaaaabaaa|abaaaaaaaaaa|aaaaabaaaaba|aaaaaaaaaaaa|.aabaaaaaaa.|..aaaccaaa..|.....cc.....|..b..cc.....|.....cc..b..|cccccccccccc","g":[],"f":[]},
+{"id":"m12","name":"The Scarecrow","pal":["#d9a441","#3f5d7d","#7a5233"],"art":".....ccccc.....|.....ccccc.....|...ccccccccc...|.....aaaaa.....|.....a.a.a.....|.....aaaaa.....|.....aa.aa.....|aaabbbbbbbbbaaa|a..bbbbcbbbb..a|...bbbbcbbbb...|...bbbbcbbbb...|....bbbcbbb....|....a..c..a....|.......c.......|ccccccccccccccc","g":[],"f":[]},
+{"id":"m13","name":"Pumpkin Cart","pal":["#d9762b","#7f9c6b","#7a5233"],"art":".....b....b....|...aabaa.aabaa.|..aaaaaaaaaaaaa|..aaaaaaaaaaaaa|...aaaaa.aaaaa.|cccccccccccccc.|c.c.c.c.c.c.cc.|cccccccccccccc.|..ccc.....ccc..|.c.b.c...c.b.c.|.cb.bc...cb.bc.|.c.b.c...c.b.c.|..ccc.....ccc..|...............|bbbbbbbbbbbbbbb","g":[],"f":[]},
+{"id":"m14","name":"Geese Going South","pal":["#6b6f78","#d9762b","#7f9c6b"],"art":"...............|.bbb...........|bbbbb...aa.aa..|bbbbb.....a....|.bbb...........|....aa.aa......|......a..aa.aa.|...........a...|aa.aa..........|..a......aa.aa.|...........a...|cc...........cc|cccc.......cccc|ccccccc..cccccc|ccccccccccccccc","g":[80,82,96,116,145,148,163],"f":[]},
+{"id":"m15","name":"Harvest Supper","pal":["#d9a441","#a8324a","#7a5233"],"art":"...b.......b...|...b.......b...|..bbb.....bbb..|..bbb.....bbb..|...............|....aaaaaaa....|..aaaaaaaaaaa..|.aabababababaa.|.aaaaaaaaaaaaa.|..aaaaaaaaaaa..|ccccccccccccccc|ccccccccccccccc|.cc.........cc.|.cc.........cc.|.cc.........cc.","g":[],"f":[]},
+{"id":"m16","name":"Snowfall","pal":["#3f5d7d"],"art":".........aa.........|....a..aaaaaa..a....|...aaa..aaaa..aaa...|..a.aaa..aa..aaa.a..|.aaa.aaa.aa.aaa.aaa.|..aaa.aaaaaaaa.aaa..|...aaa.aaaaaa.aaa...|.a..aaa.aaaa.aaa..a.|.aa..aaa.aa.aaa..aa.|aaaaaaaaaaaaaaaaaaaa|aaaaaaaaaaaaaaaaaaaa|.aa..aaa.aa.aaa..aa.|.a..aaa.aaaa.aaa..a.|...aaa.aaaaaa.aaa...|..aaa.aaaaaaaa.aaa..|.aaa.aaa.aa.aaa.aaa.|..a.aaa..aa..aaa.a..|...aaa..aaaa..aaa...|....a..aaaaaa..a....|.........aa.........","g":[],"f":[17,18,19,32]},
+{"id":"m17","name":"The Sled Hill","pal":["#3f5d7d"],"art":"....................|..............aaa...|.............aaaaa..|.............aaaaa..|..............aaa...|.............aaaaa..|............aaaaaaa.|...........aa.aaa.aa|..............aaa...|.........aaaaaaaaaaa|........aaaaaaaaaaa.|.......a.a.....a....|......aaaaaaaaa.....|.....aaaaaaaa.......|....aaaaaaaa........|...aaaaaaaa.........|..aaaaaaaaa.........|.aaaaaaaaaaaa.......|aaaaaaaaaaaaaaaa....|aaaaaaaaaaaaaaaaaaaa","g":[199],"f":[3,17,21,23]},
+{"id":"m18","name":"Woodpile & Wren","pal":["#7a5233","#d9a441"],"art":"....................|..............bb....|.............bbbb...|............bb.bbb..|.......bb..bbbbbbbbb|........bbbbbbbbb...|.........bbbbbbb....|..........b..b......|..........b..b......|...aaaa.aaaa.aaaa...|..aa..aaa..aaa..aa..|..aa..aaa..aaa..aa..|...aaaa.aaaa.aaaa...|.aaaa.aaaa.aaaa.aaaa|aa..aaa..aaa..aaa..a|aa..aaa..aaa..aaa..a|.aaaa.aaaa.aaaa.aaaa|aaaaaaaaaaaaaaaaaaaa|a..................a|aaaaaaaaaaaaaaaaaaaa","g":[99],"f":[3,13,17,24]},
+{"id":"m19","name":"Lantern Walk","pal":["#e8c25a","#a8324a","#3a2e2a"],"art":"cccccccccccccccccccc|..c.....c.....c.....|..c.....c.....c.....|.bbb...bbb...bbb....|bbbbb.bbbbb.bbbbb...|baaab.baaab.baaab...|baaab.baaab.baaab...|baaab.baaab.baaab...|bbbbb.bbbbb.bbbbb...|.bbb...bbb...bbb....|..b.....b.....b.....|.................c..|................ccc.|................ccc.|.................c..|...............ccccc|...............c.c.c|.................c..|................c.c.|cccccccccccccccccccc","g":[],"f":[1,12,22,25]},
+{"id":"m20","name":"The Winter Festival","pal":["#3f6b4a","#e8c25a","#b8323a","#7a5233"],"art":".........b..........|........bbb.........|.........b..........|.........a..........|........aaa.........|.......aacaa........|......aaaaaaa.......|.....aaabaaaaa......|......aaaaaca.......|.....aacaaaaaa......|....aaaaaabaaaa.....|...aaabaaaaaacaa....|....aaaaacaaaaa.....|...aacaaaaaaabaa....|..aaaaabaaaaaaaaa...|.aaaaaaaaacaaaaaaa..|aaacaaaaaaaaaabaaaa.|........ddd.........|........ddd.........|dddddddddddddddddddd","g":[],"f":[3,10,25,26]},
+{"id":"t1","name":"Button","pal":["#a8324a"],"art":".aaa.|aa.aa|a.a.a|aa.aa|.aaa.","g":[],"f":[]},
+{"id":"t2","name":"Thimble","pal":["#3f5d7d"],"art":".aaa.|a.a.a|aaaaa|a.a.a|aaaaa","g":[],"f":[]},
+{"id":"t3","name":"Spool","pal":["#d9a441","#a8324a"],"art":"aaaaa|.bbb.|.bbb.|.bbb.|aaaaa","g":[],"f":[]},
+{"id":"t4","name":"Needle","pal":["#6b6f78"],"art":"..a..|.a.a.|..a..|..a..|..a..","g":[],"f":[]},
+{"id":"d1","name":"Cat","pal":["#3a2e2a"],"art":"a.......a.|aa.....aa.|aaaaaaaaa.|a.aaa.aaa.|aaaaaaaaa.|.aaa.aaa..|..aaaaa..a|.aaaaaaa.a|.aaaaaaaaa|.aa.aa.aa.","g":[],"f":[]},
+{"id":"d2","name":"Fish","pal":["#6fa3c7"],"art":"....aaa...|..aaaaaa..|.aaaaaaaa.|aa.aaaaaaa|aaaaaaaa.a|aaaaaaaa..|.aaaaaaaaa|..aaaaaaaa|....aaa..a|..........","g":[],"f":[]},
+{"id":"d3","name":"Mushroom","pal":["#a8324a","#d9a441"],"art":"...aaaa...|.aaabaaaa.|aabaaaabaa|aaaaabaaaa|abaaaaaaba|..bbbbbb..|...bbbb...|...bbbb...|...bbbb...|..bbbbbb..","g":[],"f":[]},
+{"id":"d4","name":"Teapot","pal":["#3f5d7d"],"art":"....aa....|...aaaa...|.aaaaaaaa.|aaaaaaaaaa|a.aaaaaaa.|a.aaaaaaa.|.aaaaaaaa.|..aaaaaa..|..aaaaaa..|.aaaaaaaa.","g":[],"f":[]},
+{"id":"d5","name":"Acorn","pal":["#7a5233","#56602f"],"art":"....b.....|..bbbbbb..|.bbbbbbbb.|bbbbbbbbbb|.aaaaaaaa.|.aaaaaaaa.|.aaaaaaaa.|..aaaaaa..|...aaaa...|....aa....","g":[],"f":[]},
+{"id":"d6","name":"Leaf","pal":["#d9762b"],"art":".......aaa|.....aaaaa|....aaa.aa|...aaa.aaa|..aaa.aaaa|.aa.aaaaa.|.a.aaaaa..|a.aaaaa...|.aaaa.....|a.........","g":[],"f":[]},
+{"id":"d7","name":"Moon","pal":["#e8c25a"],"art":"...aaaa...|..aaa.....|.aaa......|aaa.......|aaa.......|aaa.......|aaa.......|.aaa......|..aaa.....|...aaaa...","g":[],"f":[]},
+{"id":"d8","name":"Star","pal":["#d9a441"],"art":"....aa....|....aa....|...aaaa...|aaaaaaaaaa|.aaaaaaaa.|..aaaaaa..|..aaaaaa..|.aaa..aaa.|.aa....aa.|a........a","g":[71],"f":[]},
+{"id":"d9","name":"Umbrella","pal":["#a8324a","#7a5233"],"art":"....aa....|..aaaaaa..|.aaaaaaaa.|aaaaaaaaaa|a.a.ba.a.a|....b.....|....b.....|....b.....|.b..b.....|..bb......","g":[92],"f":[]},
+{"id":"d10","name":"Sailboat","pal":["#a8324a","#3f5d7d"],"art":"....a.....|....aa....|....aaa...|....aaaa..|....aaaaa.|....a.....|bbbbbbbbbb|.bbbbbbbb.|..bbbbbb..|..........","g":[],"f":[]},
+{"id":"d11","name":"Key","pal":["#d9a441"],"art":".aaa......|a...a.....|a...aaaaaa|a...a..a.a|.aaa...a.a|..........|..........|..........|..........|..........","g":[3,10],"f":[]},
+{"id":"d12","name":"Bell","pal":["#e8c25a"],"art":"....aa....|...aaaa...|..aaaaaa..|..aaaaaa..|..aaaaaa..|.aaaaaaaa.|.aaaaaaaa.|aaaaaaaaaa|....aa....|..........","g":[],"f":[]},
+{"id":"d13","name":"Cup","pal":["#3f5d7d"],"art":"..........|.a.a.a....|..a.a.a...|..........|aaaaaaa...|aaaaaaaaa.|aaaaaaa..a|aaaaaaaaa.|.aaaaa....|aaaaaaa...","g":[11],"f":[]},
+{"id":"d14","name":"Apple","pal":["#b8323a","#56602f"],"art":".....b....|....b.bb..|..aab.aa..|.aaaaaaaa.|aaaaaaaaaa|aaaaaaaaaa|aaaaaaaaaa|.aaaaaaaa.|.aaaaaaaa.|..aa..aa..","g":[5],"f":[]},
+{"id":"d15","name":"Pear","pal":["#56602f","#7a5233"],"art":"....b.....|....b.....|...aaa....|...aaa....|..aaaaa...|.aaaaaaa..|aaaaaaaaa.|aaaaaaaaa.|aaaaaaaaa.|.aaaaaaa..","g":[],"f":[]},
+{"id":"d16","name":"Cherries","pal":["#b8323a","#56602f"],"art":"......bb..|.....bbb..|....bb.bb.|...bb...b.|..bb....b.|.bb....aaa|aaa...aaaa|aaaa..aaaa|aaaa...aa.|.aa.......","g":[15],"f":[]},
+{"id":"d17","name":"Bird","pal":["#6fa3c7","#d9a441"],"art":"..aaa.....|.a.aa.....|aaaaab....|.aaaaaaa..|..aaaaaaaa|..aaaaaaa.|...aaaaa..|....b.b...|....b.b...|...bb.bb..","g":[],"f":[]},
+{"id":"d18","name":"Owl","pal":["#7a5233","#d9a441"],"art":"a.......a.|aa.....aa.|abbbabbba.|ab.bab.ba.|abbbabbba.|aaaaaaaaa.|aaaaaaaaa.|aa.aaa.aa.|.aaaaaaa..|..b...b...","g":[],"f":[]},
+{"id":"d19","name":"Frog","pal":["#7f9c6b"],"art":".aa....aa.|a..a..a..a|a..aaaa..a|.aaaaaaaa.|aaaaaaaaaa|aa......aa|.aaaaaaaa.|..aaaaaa..|.aa.aa.aa.|aa......aa","g":[],"f":[]},
+{"id":"d20","name":"Snail","pal":["#7a5233","#7f9c6b"],"art":"..aaaa....|.aa..aa...|aa.aa.aa..|a.a..a.a..|a.a.aa.a..|a..a..aa..|.aa.aaa..b|..aaaa...b|bbbbbbbbbb|.bbbbbbbb.","g":[],"f":[]},
+{"id":"d21","name":"Sun","pal":["#d9762b"],"art":"a...a...a.|.a..a..a..|..aaaaa...|.aaaaaaa..|aaaaaaaaaa|.aaaaaaa..|..aaaaa...|.a..a..a..|a...a...a.|..........","g":[0,8,71,77],"f":[]},
+{"id":"d22","name":"Cloud","pal":["#6fa3c7"],"art":"..........|...aaa....|..aaaaa...|.aaaaaaaa.|aaaaaaaaaa|aaaaaaaaaa|.aaaaaaaa.|..........|.a..a..a..|a..a..a...","g":[81,84,87],"f":[]},
+{"id":"d23","name":"Cottage","pal":["#a8324a","#7a5233"],"art":".......bb.|...aaaabb.|..aaaaaaa.|.aaaaaaaaa|aaaaaaaaaa|.bbbbbbbb.|.b..bb..b.|.b..bb..b.|.bbbbbbbb.|.bbbbbbbb.","g":[],"f":[]},
+{"id":"d24","name":"Pine","pal":["#3f6b4a","#7a5233"],"art":"....a.....|...aaa....|..aaaaa...|...aaa....|..aaaaa...|.aaaaaaa..|..aaaaa...|.aaaaaaa..|aaaaaaaaa.|....b.....","g":[],"f":[]},
+{"id":"d25","name":"Daisy","pal":["#d9a441","#7f9c6b"],"art":"...a.a....|..aaaaa...|.aaa.aaa..|..a...a...|.aaa.aaa..|..aaaaa...|...aba....|....b..b..|.b..b.bb..|.bb.bbb...","g":[],"f":[]},
+{"id":"d26","name":"Butterfly","pal":["#a8324a","#3a2e2a"],"art":"aa.....aa.|aaa.b.aaa.|aaaabaaaa.|aaaabaaaa.|.aaabaaa..|..aabaa...|.aaabaaa..|aaaabaaaa.|aaa.b.aaa.|.a.....a..","g":[],"f":[]},
+{"id":"d27","name":"Rabbit","pal":["#6b6f78"],"art":".a.a......|.a.a......|.a.a......|.aaa......|aaaaa.....|a.a.a.....|aaaaaaaa..|.aaaaaaaaa|.aaaaaaaaa|..aa..aa..","g":[],"f":[]},
+{"id":"d28","name":"Mitten","pal":["#a8324a","#e9eef2"],"art":"..aaaa....|.aaaaaa...|.aaaaaa...|.aaaaaa.aa|.aaaaaaaaa|.aaaaaaaa.|.aaaaaaa..|.aaaaaa...|.bbbbbb...|.bbbbbb...","g":[],"f":[]},
+{"id":"d29","name":"Boot","pal":["#7a5233"],"art":"...aaaa...|...aaaa...|...aaaa...|...aaaa...|...aaaa...|...aaaa...|...aaaaa..|...aaaaaaa|..aaaaaaaa|..aaaaaaaa","g":[],"f":[]},
+{"id":"d30","name":"Top Hat","pal":["#3a2e2a","#a8324a"],"art":"..aaaaa...|..aaaaa...|..aaaaa...|..aaaaa...|..bbbbb...|aaaaaaaaa.|..........|..........|..........|..........","g":[],"f":[]},
+{"id":"d31","name":"Kite","pal":["#d9a441","#a8324a"],"art":"....a.....|...aaa....|..aaaaa...|.bbbbbbb..|..aaaaa...|...aaa....|....a.....|.....b....|....b.b...|.....b..b.","g":[31],"f":[]},
+{"id":"d32","name":"Anchor","pal":["#3f5d7d"],"art":"....aa....|...a..a...|....aa....|..aaaaaa..|....aa....|a...aa...a|aa..aa..aa|.aa.aa.aa.|..aaaaaa..|....aa....","g":[],"f":[]},
+{"id":"d33","name":"Candle","pal":["#d9a441","#a8324a"],"art":"....a.....|...aaa....|....a.....|...bbb....|...bbb....|...bbb....|...bbb....|...bbb....|.bbbbbbb..|bbbbbbbbb.","g":[],"f":[]},
+{"id":"d34","name":"Envelope","pal":["#3f5d7d"],"art":"aaaaaaaaaa|aa......aa|a.a....a.a|a..a..a..a|a...aa...a|a........a|a........a|aaaaaaaaaa|..........|..........","g":[22,36],"f":[]},
+{"id":"d35","name":"Scissors","pal":["#6b6f78"],"art":"aa......aa|.aa....aa.|..aa..aa..|...aaaa...|....aa....|...aaaa...|.aaa..aaa.|a..a..a..a|a..a..a..a|.aa....aa.","g":[33],"f":[]},
+{"id":"d36","name":"Spool","pal":["#7a5233","#a8324a"],"art":"aaaaaaaaaa|.bbbbbbbb.|.bbbbbbbb.|.bbbbbbbb.|.bbbbbbbb.|.bbbbbbbb.|.bbbbbbbb.|.bbbbbbbbb|aaaaaaaa.b|.........b","g":[],"f":[]},
+{"id":"d37","name":"Sock","pal":["#a8324a","#d9a441"],"art":"..bbbbb...|..aaaaa...|..bbbbb...|..aaaaa...|..aaaaa...|..aaaaa...|..aaaaaaa.|..aaaaaaaa|..aaaaaaaa|...aaaaaa.","g":[],"f":[]},
+{"id":"d38","name":"Lantern","pal":["#3a2e2a","#e8c25a"],"art":"....a.....|...a.a....|..aaaaa...|.a.bbb.a..|.a.bbb.a..|.a.bbb.a..|.a.bbb.a..|..aaaaa...|.aaaaaaa..|..........","g":[],"f":[]},
+{"id":"d39","name":"Heart Pin","pal":["#a8324a"],"art":".aa..aa...|aaaaaaaa..|aaaaaaaa..|aaaaaaaa..|.aaaaaa...|..aaaa....|...aa.....|.........a|........a.|.......a..","g":[79,88],"f":[]},
+{"id":"d40","name":"Mug of Cocoa","pal":["#7a5233","#a8324a"],"art":"..a..a....|...a..a...|..........|bbbbbbb...|baaaaab...|bbbbbbbbb.|bbbbbbb..b|bbbbbbb..b|bbbbbbbbb.|.bbbbb....","g":[2,5],"f":[]}
+];
+/*@data-end*/
+
+(function () {
+  'use strict';
+  var GAME_ID = 'nonogram';
+  var $ = function (id) { return document.getElementById(id); };
+  var Q = QuiltCoreFactory();
+  var BYID = {}; PUZ.forEach(function (d) { BYID[d.id] = d; });
+  var FONT = '"Gill Sans", "Gill Sans MT", "Segoe UI", system-ui, sans-serif';
+  var TOUCH = false;
+  function setTouch(on) { if (on === TOUCH) return; TOUCH = on; document.body.classList.toggle('touch', on); document.body.classList.toggle('no-touch', !on); if (scene === 'play') layoutPlay(); }
+  try { setTouch(matchMedia('(pointer: coarse)').matches); } catch (e) { /* old browser */ }
+  var clamp = function (v, a, b) { return v < a ? a : v > b ? b : v; };
+  var mmss = function (s) { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2); };
+
+  /* ── The campaign: 20 patches in four seasons ─────────────────── */
+  var MISSIONS = [null,
+    { name: 'First Stitches', p: ['m1a', 'm1b', 'm1c'], par: 120, goal: 'Sew all three little patches', tip: 'A 5 in a row of 5 is a free row — stitch it straight away.' },
+    { name: 'The Well', p: ['m2a', 'm2b'], par: 180, goal: 'Sew both patches', tip: 'An 8 in a line of 8 is a whole line. Find those first.' },
+    { name: 'Spring Lamb', p: ['m3'], par: 240, goal: 'Sew the patch', tip: 'The bottom row is the meadow — one long run.' },
+    { name: 'Bee & Clover', p: ['m4'], par: 240, goal: 'Sew the patch', tip: 'Pins are free. Pin every square you can prove is empty.' },
+    { name: 'The Old Mill', p: ['m5'], par: 300, goal: 'Sew the centrepiece', boss: true, tip: 'The sails cross in the middle — work in from the corners.' },
+    { name: 'Strawberries', p: ['m6'], par: 240, goal: 'Sew it in two threads', tip: 'A clue tile’s colour is its run’s colour. Pick the thread before you stitch.' },
+    { name: 'Swimming Hole', p: ['m7'], par: 240, goal: 'Sew it in two threads', tip: 'Green and blue may touch — two greens may not.' },
+    { name: 'Sunflowers', p: ['m8'], par: 300, goal: 'Sew it in two threads', tip: 'The flower’s heart is one colour; ring it with the other.' },
+    { name: 'Fiddle at Dusk', p: ['m9'], par: 300, goal: 'Sew it in two threads', tip: 'The strings run straight down the middle.' },
+    { name: 'The Summer Fair', p: ['m10'], par: 420, goal: 'Sew the centrepiece', boss: true, tip: 'Long stripes first; the bunting row is all little ones.' },
+    { name: 'Apple Picking', p: ['m11'], par: 330, goal: 'Sew it in three threads', tip: 'Three threads now — read each clue’s colour.' },
+    { name: 'The Scarecrow', p: ['m12'], par: 420, goal: 'Sew it in three threads', tip: 'The hat brim is one wide run of brown.' },
+    { name: 'Pumpkin Cart', p: ['m13'], par: 420, goal: 'Sew it in three threads', tip: 'Wheels are rings: pin their middles.' },
+    { name: 'Geese Going South', p: ['m14'], par: 420, goal: 'Sew it in three threads', tip: 'Lots of little runs. Pin generously.' },
+    { name: 'Harvest Supper', p: ['m15'], par: 420, goal: 'Sew the centrepiece', boss: true, tip: 'The table is two long rows of brown — free lines.' },
+    { name: 'Snowfall', p: ['m16'], par: 720, goal: 'Sew it with frosty thread', tip: 'A snowflake is the same on every side. So are its clues.' },
+    { name: 'The Sled Hill', p: ['m17'], par: 720, goal: 'Sew it with frosty thread', tip: 'The hill is solid at the bottom — start there.' },
+    { name: 'Woodpile & Wren', p: ['m18'], par: 720, goal: 'Sew it with frosty thread', tip: 'Logs are rings; the wren sits on top.' },
+    { name: 'Lantern Walk', p: ['m19'], par: 720, goal: 'Sew it with frosty thread', tip: 'Three lanterns, the same shape. Solve one, copy the logic.' },
+    { name: 'The Winter Festival', p: ['m20'], par: 720, goal: 'Sew the last centrepiece', boss: true, tip: 'The trunk and the ground are free. Then climb the tree.' },
+  ];
+  var NM = 20;
+  var ACTS = [null,
+    { name: 'Spring', c: '#7f9c6b', ppal: ['#000000', '#f4e9d4', '#e08a4a', '#7f9c6b', '#2b2320'] },
+    { name: 'Summer', c: '#d9a441', ppal: ['#000000', '#f7ecd2', '#e48a3c', '#3f5d7d', '#2b2320'] },
+    { name: 'Autumn', c: '#c4632f', ppal: ['#000000', '#f3e3c8', '#d9762b', '#a8324a', '#2b2320'] },
+    { name: 'Winter', c: '#3f5d7d', ppal: ['#000000', '#eef2f6', '#e08a4a', '#3f5d7d', '#1d2230'] },
+  ];
+  var actOf = function (n) { return Math.ceil(n / 5); };
+  var bandOf = function (n) { return 1 + Math.min(3, Math.floor((n - 1) / 5)); };
+  var DIFFS = [{ name: 'Cosy', t: 5, sub: '5 thread' }, { name: 'Snug', t: 3, sub: '3 thread' }, { name: 'Brisk', t: 2, sub: '2 thread · no row glow' }];
+  function threadFor(n, diff) { return Math.max(1, DIFFS[diff].t - (actOf(n) === 4 ? 1 : 0)); }
+  var RANKS = ['Threader', 'Patcher', 'Stitcher', 'Quilter', 'Master Quilter'];
+  function rankOf(c) { return RANKS[c >= 20 ? 4 : c >= 14 ? 3 : c >= 9 ? 2 : c >= 4 ? 1 : 0]; }
+  var FABRICS = [{ name: 'Homespun Calico', st: 'calico' }, { name: 'Gingham Picnic', st: 'gingham' }, { name: 'Corduroy Barn', st: 'cord' }, { name: 'Starry Flannel', st: 'star' }, { name: 'Harvest Plaid', st: 'plaid' }];
+  var DAILY = PUZ.filter(function (d) { return d.id[0] === 'd'; });
+  var SCRAPS = ['t1', 't2', 't3', 't4'];
+
+  /* ── The save (versioned; earlier saves of this file keep loading) ──────── */
+  var SKEY = 'tm.nonogram.v1';
+  function defSave() {
+    return { v: 1, cleared: {}, best: {}, flaw: {}, fails: {}, sewn: {}, portraits: {},
+      fabric: 0, set: { check: 'gentle', voice: 'on', motion: 'auto', sound: true }, run: null, hints: {}, tips: {}, lastDiff: 1,
+      daily: { best: {}, streak: 0, last: '' }, st: { pricks: 0, time: 0, patches: 0, flawless: 0, lines: 0 }, mid: {}, last: 0, lastWin: '' };
+  }
+  function mergeSave(base, s) {
+    Object.keys(s).forEach(function (k) {
+      if (base[k] && typeof base[k] === 'object' && !Array.isArray(base[k]) && s[k] && typeof s[k] === 'object' && !Array.isArray(s[k])) Object.keys(s[k]).forEach(function (j) { base[k][j] = s[k][j]; });
+      else base[k] = s[k];
+    });
+    return base;
+  }
+  function loadSave() { try { var s = JSON.parse(localStorage.getItem(SKEY) || 'null'); if (s && s.v === 1) return mergeSave(defSave(), s); } catch (e) { /* private mode */ } return defSave(); }
+  var S = loadSave();
+  function save() { try { localStorage.setItem(SKEY, JSON.stringify(S)); } catch (e) { /* storage full or blocked: play on */ } }
+  /* Another tab saved: take its progress (never its live board). */
+  addEventListener('storage', function (e) {
+    if (e.key !== SKEY || !e.newValue) return;
+    try { var o = JSON.parse(e.newValue); if (!o || o.v !== 1) return; var run = S.run; S = mergeSave(defSave(), o); if (G && G.mode === 'camp' && !G.done) S.run = run; paintThread(); } catch (er) { /* ignore */ }
+  });
+  function clearedCount() { var c = 0; for (var n = 1; n <= NM; n++) if (S.cleared[n]) c++; return c; }
+  function nextMission() { for (var n = 1; n <= NM; n++) if (!S.cleared[n]) return n; return 0; }
+  function isOpen(n) { return n === 1 || !!S.cleared[n - 1]; }
+
+  /* ── Motion: the OS switch or our own ──────────────────────────────────── */
+  var RM = false;
+  function applyMotion() {
+    var os = false; try { os = matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { /* none */ }
+    RM = S.set.motion === 'reduced' || (S.set.motion === 'auto' && os);
+    if (RM) document.documentElement.setAttribute('data-motion', 'reduced'); else document.documentElement.removeAttribute('data-motion');
+  }
+  applyMotion();
+
+  /* ── Sound: WebAudio, made here ────────────────────────────────────────── */
+  var AC = null, MASTER = null, NOISE = null;
+  function audio() {
+    if (!S.set.sound) return null;
+    if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); MASTER = AC.createGain(); MASTER.gain.value = 0.45; MASTER.connect(AC.destination);
+      NOISE = AC.createBuffer(1, AC.sampleRate * 0.5, AC.sampleRate); var d = NOISE.getChannelData(0); for (var i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; } catch (e) { AC = null; } }
+    if (AC && AC.state === 'suspended') AC.resume();
+    return AC;
+  }
+  function tone(f, dur, type, vol, delay, f2) {
+    var a = audio(); if (!a) return;
+    var t = a.currentTime + (delay || 0), o = a.createOscillator(), g = a.createGain();
+    o.type = type || 'sine'; o.frequency.setValueAtTime(f, t); if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + dur);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol || 0.2, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(MASTER); o.start(t); o.stop(t + dur + 0.02);
+  }
+  function hiss(dur, vol, freq, delay, q) {
+    var a = audio(); if (!a) return;
+    var t = a.currentTime + (delay || 0), s = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain();
+    s.buffer = NOISE; f.type = 'bandpass'; f.frequency.value = freq || 1200; f.Q.value = q || 1;
+    g.gain.setValueAtTime(vol || 0.2, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(f); f.connect(g); g.connect(MASTER); s.start(t, Math.random() * 0.3); s.stop(t + dur + 0.02);
+  }
+  var lastTuk = 0;
+  var SFX = {
+    tuk: function () { var n = performance.now(); if (n - lastTuk < 35) return; lastTuk = n; hiss(0.05, 0.25, 2400, 0, 3); tone(170, 0.06, 'triangle', 0.12); },
+    pin: function () { tone(2200, 0.05, 'square', 0.05); tone(3300, 0.04, 'sine', 0.06, 0.01); },
+    swish: function () { hiss(0.35, 0.18, 900, 0, 0.7); hiss(0.25, 0.1, 2600, 0.05, 0.7); },
+    prick: function () { tone(520, 0.18, 'sawtooth', 0.08, 0, 260); tone(300, 0.25, 'triangle', 0.1, 0.05, 180); },
+    undo: function () { tone(660, 0.06, 'sine', 0.08, 0, 440); },
+    pick: function () { tone(880, 0.05, 'sine', 0.07); },
+    box: function () { [784, 988, 1175, 1568, 1319, 1175, 988, 1175].forEach(function (f, i) { tone(f, 0.5, 'sine', 0.1, i * 0.16); tone(f * 2, 0.25, 'triangle', 0.025, i * 0.16); }); },
+    crackle: function () { hiss(0.04 + Math.random() * 0.05, 0.05 + Math.random() * 0.08, 500 + Math.random() * 2500, 0, 2); },
+    fail: function () { [392, 349, 311, 262].forEach(function (f, i) { tone(f, 0.4, 'triangle', 0.08, i * 0.18); }); },
+  };
+
+  /* ── Colour helpers ────────────────────────────────────────────────────── */
+  function rgbOf(h) { var v = parseInt(h.slice(1), 16); return [v >> 16 & 255, v >> 8 & 255, v & 255]; }
+  function mix(h, h2, t) { var a = rgbOf(h), b = rgbOf(h2); return '#' + [0, 1, 2].map(function (i) { return ('0' + Math.round(a[i] + (b[i] - a[i]) * t).toString(16)).slice(-2); }).join(''); }
+  function lum(h) { var a = rgbOf(h); return (a[0] * 0.3 + a[1] * 0.59 + a[2] * 0.11) / 255; }
+  function midnightPal(pal) { return pal.map(function (h) { return mix(mix(h, '#1f2a55', 0.35), '#cfd8ff', 0.18); }); }
+  function mk(w, h) { var c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w)); c.height = Math.max(1, Math.round(h)); return c; }
+
+  /* A fabric swatch tile for one colour in one fabric set — a CanvasPattern is made from it per layer. */
+  function fabricTile(hex, st, t) {
+    var c = mk(t, t), x = c.getContext('2d'), lt = mix(hex, '#ffffff', 0.28), dk = mix(hex, '#000000', 0.22);
+    x.fillStyle = hex; x.fillRect(0, 0, t, t);
+    if (st === 'calico') { x.fillStyle = lt; x.beginPath(); x.arc(t * 0.28, t * 0.3, t * 0.13, 0, 7); x.fill(); x.fillStyle = dk; x.beginPath(); x.arc(t * 0.76, t * 0.72, t * 0.1, 0, 7); x.fill(); }
+    else if (st === 'gingham') { x.fillStyle = 'rgba(255,255,255,.22)'; x.fillRect(0, 0, t / 2, t); x.fillRect(0, 0, t, t / 2); }
+    else if (st === 'cord') { x.fillStyle = dk; for (var i = 0; i < t; i += 3) x.fillRect(i, 0, 1, t); }
+    else if (st === 'star') { x.fillStyle = lt; x.fillRect(t * 0.45, t * 0.25, t * 0.1, t * 0.5); x.fillRect(t * 0.25, t * 0.45, t * 0.5, t * 0.1); }
+    else if (st === 'plaid') { x.fillStyle = dk; x.fillRect(0, t * 0.3, t, 1); x.fillRect(t * 0.3, 0, 1, t); x.fillStyle = lt; x.fillRect(0, t * 0.75, t, 1); x.fillRect(t * 0.75, 0, 1, t); }
+    return c;
+  }
+  var LINEN_TILE = (function () {
+    var c = mk(8, 8), x = c.getContext('2d'); x.fillStyle = '#efe6d2'; x.fillRect(0, 0, 8, 8);
+    x.fillStyle = 'rgba(120,96,64,.07)'; for (var i = 0; i < 8; i += 2) { x.fillRect(i, 0, 1, 8); x.fillRect(0, i + 1, 8, 1); }
+    return c;
+  })();
+
+  /* A picture (or a pencil sketch of one) in a square. */
+  function drawPic(c, def, x, y, size, o) {
+    o = o || {};
+    var rows = def.art.split('|'), h = rows.length, w = rows[0].length, s = size / Math.max(w, h), ox = x + (size - w * s) / 2, oy = y + (size - h * s) / 2;
+    var pal = o.mid ? midnightPal(def.pal) : def.pal;
+    for (var r = 0; r < h; r++) for (var q = 0; q < w; q++) {
+      var ch = rows[r].charCodeAt(q); if (ch === 46) continue;
+      if (o.sketch) { c.fillStyle = 'rgba(90,70,50,.16)'; c.fillRect(ox + q * s + s * 0.3, oy + r * s + s * 0.3, s * 0.4, s * 0.4); continue; }
+      c.fillStyle = pal[ch - 97]; c.fillRect(ox + q * s, oy + r * s, Math.ceil(s), Math.ceil(s));
+    }
+  }
+  /* A mission's patch: one picture, or two/three small ones side by side. */
+  function drawMission(c, n, x, y, size, o) {
+    var ids = MISSIONS[n].p;
+    if (ids.length === 1) { drawPic(c, BYID[ids[0]], x + size * 0.08, y + size * 0.08, size * 0.84, o); return; }
+    var k = ids.length, s = size * (k === 2 ? 0.46 : 0.42);
+    ids.forEach(function (id, i) {
+      var px = k === 2 ? x + size * 0.04 + i * size * 0.5 : x + [0.05, 0.53, 0.29][i] * size, py = k === 2 ? y + size * 0.27 : y + [0.06, 0.06, 0.52][i] * size;
+      drawPic(c, BYID[id], px, py, s, o);
+    });
+  }
+  function drawPortrait(c, act, x, y, size) {
+    var str = S.portraits[act]; if (!str) return false;
+    var pal = ACTS[act].ppal, s = size / 24;
+    for (var i = 0; i < 576; i++) { var v = str.charCodeAt(i) - 48; if (!v) continue; c.fillStyle = pal[v]; c.fillRect(x + (i % 24) * s, y + Math.floor(i / 24) * s, Math.ceil(s), Math.ceil(s)); }
+    return true;
+  }
+
+  /* ── The story quilt: 4 seasons × (5 patches + a portrait patch) ───────── */
+  function drawQuilt(c, x, y, w, h, o) {
+    o = o || {};
+    var s = Math.min(w / 6.3, h / 4.3), qw = s * 6, qh = s * 4, qx = x + (w - qw) / 2, qy = y + (h - qh) / 2, b = s * 0.15;
+    c.fillStyle = '#7a2a3a'; c.fillRect(qx - b, qy - b, qw + 2 * b, qh + 2 * b);
+    c.strokeStyle = 'rgba(255,240,220,.55)'; c.lineWidth = Math.max(1, s * 0.02); c.setLineDash([s * 0.06, s * 0.05]); c.strokeRect(qx - b * 0.5, qy - b * 0.5, qw + b, qh + b); c.setLineDash([]);
+    var fest = !!S.cleared[20];
+    for (var a = 1; a <= 4; a++) for (var i = 0; i < 6; i++) {
+      var px = qx + i * s, py = qy + (a - 1) * s, n = (a - 1) * 5 + i + 1, port = i === 5;
+      c.fillStyle = (i + a) % 2 ? '#f4ead5' : '#efe1c4'; c.fillRect(px, py, s, s);
+      c.fillStyle = 'rgba(168,50,74,.08)'; for (var dy = 0.12; dy < 1; dy += 0.25) for (var dx = 0.12; dx < 1; dx += 0.25) c.fillRect(px + dx * s, py + dy * s, s * 0.04, s * 0.04);
+      if (port) { if (!drawPortrait(c, a, px + s * 0.1, py + s * 0.1, s * 0.8)) { c.strokeStyle = 'rgba(90,70,50,.25)'; c.setLineDash([s * 0.05, s * 0.05]); c.beginPath(); c.arc(px + s / 2, py + s / 2, s * 0.28, 0, 7); c.stroke(); c.setLineDash([]); } }
+      else if (S.cleared[n]) {
+        drawMission(c, n, px, py, s, {});
+        if (a === 4) { c.fillStyle = 'rgba(255,255,255,.75)'; for (var f = 0; f < 6; f++) c.fillRect(px + ((f * 37 + n * 13) % 90) / 100 * s, py + ((f * 53 + n * 7) % 90) / 100 * s, s * 0.03, s * 0.03); }
+      } else if (o.sketch !== false) drawMission(c, n, px, py, s, { sketch: true });
+      c.strokeStyle = 'rgba(60,40,30,.35)'; c.lineWidth = 1; c.strokeRect(px + 0.5, py + 0.5, s - 1, s - 1);
+      c.strokeStyle = 'rgba(255,250,240,.6)'; c.setLineDash([s * 0.05, s * 0.04]); c.strokeRect(px + s * 0.05, py + s * 0.05, s * 0.9, s * 0.9); c.setLineDash([]);
+    }
+    for (a = 1; a <= 4; a++) { c.fillStyle = ACTS[a].c; c.fillRect(qx - b, qy + (a - 1) * s + s * 0.1, b * 0.6, s * 0.8); }
+    return { x: qx, y: qy, s: s, w: qw, h: qh, fest: fest };
+  }
+  function slotRect(Qr, n) { var a = actOf(n), i = (n - 1) % 5; return { x: Qr.x + i * Qr.s, y: Qr.y + (a - 1) * Qr.s, s: Qr.s }; }
+
+  /* Grandpa Amos, drawn once. */
+  (function drawAmos() {
+    var c = $('amosFace').getContext('2d'), s = 92;
+    c.fillStyle = '#7f9c6b'; c.beginPath(); c.arc(s / 2, s / 2, s / 2, 0, 7); c.fill();
+    c.fillStyle = '#e9b98f'; c.beginPath(); c.arc(s / 2, s * 0.5, s * 0.28, 0, 7); c.fill();
+    c.fillStyle = '#f2efe8'; c.beginPath(); c.moveTo(s * 0.24, s * 0.52); c.quadraticCurveTo(s * 0.5, s * 1.02, s * 0.76, s * 0.52); c.quadraticCurveTo(s * 0.5, s * 0.7, s * 0.24, s * 0.52); c.fill();
+    c.fillStyle = '#3f5d7d'; c.beginPath(); c.ellipse(s / 2, s * 0.27, s * 0.3, s * 0.12, 0, Math.PI, 0); c.fill(); c.fillRect(s * 0.18, s * 0.26, s * 0.64, s * 0.05);
+    c.strokeStyle = '#4a3022'; c.lineWidth = 2.4; c.beginPath(); c.arc(s * 0.4, s * 0.46, s * 0.07, 0, 7); c.stroke(); c.beginPath(); c.arc(s * 0.6, s * 0.46, s * 0.07, 0, 7); c.stroke(); c.beginPath(); c.moveTo(s * 0.47, s * 0.46); c.lineTo(s * 0.53, s * 0.46); c.stroke();
+    c.fillStyle = '#2b2320'; c.beginPath(); c.arc(s * 0.4, s * 0.47, 2.4, 0, 7); c.arc(s * 0.6, s * 0.47, 2.4, 0, 7); c.fill();
+    c.strokeStyle = '#c9a080'; c.beginPath(); c.arc(s / 2, s * 0.6, s * 0.06, 0.2, Math.PI - 0.2); c.stroke();
+  })();
+
+  /* ══ The board: a puzzle on the frame, what the player has stitched, and how it is drawn ══════════ */
+  var PIN = 8, DASH6 = [5, 4], DASH0 = [];
+  function makeBoard(def, o) {
+    o = o || {};
+    var p = Q.parse(def), NL = p.h + p.w, CL = Q.clues(p), LIDX = [], mr = 1, mc = 1;
+    for (var l = 0; l < NL; l++) { LIDX.push(Int16Array.from(Q.lineCells(p, l))); if (l < p.h) mr = Math.max(mr, CL[l].n.length); else mc = Math.max(mc, CL[l].n.length); }
+    var B = { def: def, p: p, CL: CL, LIDX: LIDX, NL: NL, cells: new Int8Array(p.w * p.h), lock: new Uint8Array(p.w * p.h), lineDone: new Uint8Array(NL), faded: new Uint8Array(NL),
+      mr: mr, mc: mc, cx: 0, cy: 0, colour: 1, tool: 'stitch', dirtyGrid: true, dirtyClue: true, L: null, hover: -1,
+      trueMode: !!o.trueMode, brisk: !!o.brisk, pal: o.mid ? midnightPal(p.pal) : p.pal.slice(), fabric: o.fabric == null ? S.fabric : o.fabric, done: false, hooks: o.hooks || {} };
+    p.givens.forEach(function (i) { B.cells[i] = p.cells[i] || PIN; B.lock[i] = 1; });
+    if (!o.noFade) p.faded.forEach(function (l2) { B.faded[l2] = 1; });
+    return B;
+  }
+  function filledCount(B) { var n = 0; for (var i = 0; i < B.cells.length; i++) if (B.cells[i] >= 1 && B.cells[i] <= 4) n++; return n; }
+  function correctCount(B) { var n = 0, c = B.p.cells; for (var i = 0; i < c.length; i++) if (c[i] && B.cells[i] === c[i]) n++; return n; }
+  /* What the player provably knows (their right stitches and right pins) as solver masks. */
+  function know(B) {
+    var k = new Uint8Array(B.cells.length), F = Q.full(B.p.k), t = B.p.cells;
+    for (var i = 0; i < k.length; i++) { var v = B.cells[i]; k[i] = v >= 1 && v <= 4 && v === t[i] ? Q.BIT[v] : v === PIN && t[i] === 0 ? 1 : F; }
+    return k;
+  }
+  function lineMatches(B, l) {
+    var idx = B.LIDX[l], ns = B.CL[l].n, cs = B.CL[l].c, j = 0, i = 0, L = idx.length;
+    while (i < L) { var v = B.cells[idx[i]]; if (v < 1 || v > 4) { i++; continue; } var s = i; while (i < L && B.cells[idx[i]] === v) i++; if (j >= ns.length || ns[j] !== i - s || cs[j] !== v) return false; j++; }
+    return j === ns.length;
+  }
+  function lineName(B, l) { return l < B.p.h ? 'Row ' + (l + 1) : 'Column ' + (l - B.p.h + 1); }
+  function clueText(B, l) { return B.CL[l].n.length ? B.CL[l].n.join(' ') : '0'; }
+
+  /* Geometry: cells as big as fit; below the minimum, a window onto the patch that follows the needle. */
+  function boardGeo(B, area, minCs) {
+    var p = B.p, U = 0.74;
+    var cs = Math.floor(Math.min(area.w / (p.w + B.mr * U + 0.5), area.h / (p.h + B.mc * U + 0.5), 62));
+    if (cs < minCs) cs = minCs;
+    var rw = Math.ceil(B.mr * U * cs + 0.45 * cs), ch = Math.ceil(B.mc * U * cs + 0.45 * cs);
+    var vc = clamp(Math.floor((area.w - rw) / cs), 3, p.w), vr = clamp(Math.floor((area.h - ch) / cs), 3, p.h);
+    var tw = rw + vc * cs, th = ch + vr * cs;
+    return { cs: cs, rw: rw, ch: ch, vc: vc, vr: vr, gx: Math.round(area.x + Math.max(0, (area.w - tw) / 2) + rw), gy: Math.round(area.y + Math.max(0, (area.h - th) / 2) + ch),
+      cam: vc < p.w || vr < p.h, camX: 0, camY: 0, area: area };
+  }
+  function follow(B, geo) {
+    if (!geo || !geo.cam) return;
+    var x = B.cx, y = B.cy, ox = geo.camX, oy = geo.camY;
+    if (x < geo.camX + 1) geo.camX = x - 1; if (x > geo.camX + geo.vc - 2) geo.camX = x - geo.vc + 2;
+    if (y < geo.camY + 1) geo.camY = y - 1; if (y > geo.camY + geo.vr - 2) geo.camY = y - geo.vr + 2;
+    geo.camX = clamp(geo.camX, 0, B.p.w - geo.vc); geo.camY = clamp(geo.camY, 0, B.p.h - geo.vr);
+    if (ox !== geo.camX || oy !== geo.camY) wake();
+  }
+
+  function ensureLayers(B, geo) {
+    var cs = geo.cs, d = DPR;
+    if (B.L && B.L.cs === cs && B.L.d === d && B.L.fab === B.fabric) return;
+    var p = B.p, L = { cs: cs, d: d, fab: B.fabric, grid: mk(p.w * cs * d, p.h * cs * d), row: mk(geo.rw * d, p.h * cs * d), col: mk(p.w * cs * d, geo.ch * d), rw: geo.rw, ch: geo.ch };
+    var gx = L.grid.getContext('2d'), st = FABRICS[B.fabric] ? FABRICS[B.fabric].st : 'calico', t = Math.max(4, Math.round(cs / 3));
+    L.pats = [null]; for (var v = 1; v <= p.k; v++) L.pats.push(gx.createPattern(fabricTile(B.pal[v - 1], st, t), 'repeat'));
+    L.linen = gx.createPattern(LINEN_TILE, 'repeat');
+    L.dashA = [Math.max(2, cs * 0.13), Math.max(2, cs * 0.1)]; L.dash0 = [];
+    B.L = L; B.dirtyGrid = B.dirtyClue = true;
+  }
+  function paintGrid(B) {
+    var L = B.L, c = L.grid.getContext('2d'), cs = L.cs, p = B.p, W = p.w * cs, H = p.h * cs;
+    c.setTransform(L.d, 0, 0, L.d, 0, 0);
+    c.fillStyle = L.linen; c.fillRect(0, 0, W, H);
+    if (!B.brisk) { c.fillStyle = 'rgba(217,164,65,.16)'; for (var l = 0; l < B.NL; l++) if (B.lineDone[l]) { if (l < p.h) c.fillRect(0, l * cs, W, cs); else c.fillRect((l - p.h) * cs, 0, cs, H); } }
+    for (var i = 0; i < B.cells.length; i++) drawCell(c, B, i, (i % p.w) * cs, Math.floor(i / p.w) * cs, cs);
+    c.lineWidth = 1;
+    for (var x = 1; x < p.w; x++) { c.fillStyle = x % 5 ? 'rgba(70,50,35,.16)' : 'rgba(70,50,35,.5)'; c.fillRect(x * cs - (x % 5 ? 0.5 : 1), 0, x % 5 ? 1 : 2, H); }
+    for (var y = 1; y < p.h; y++) { c.fillStyle = y % 5 ? 'rgba(70,50,35,.16)' : 'rgba(70,50,35,.5)'; c.fillRect(0, y * cs - (y % 5 ? 0.5 : 1), W, y % 5 ? 1 : 2); }
+    c.strokeStyle = 'rgba(70,50,35,.7)'; c.lineWidth = 2; c.strokeRect(1, 1, W - 2, H - 2);
+    B.dirtyGrid = false;
+  }
+  function drawCell(c, B, i, x, y, s) {
+    var v = B.cells[i], lk = B.lock[i], L = B.L;
+    if (v >= 1 && v <= 4) {
+      c.fillStyle = L.pats[v] || B.pal[v - 1]; c.fillRect(x + 1, y + 1, s - 2, s - 2);
+      c.fillStyle = 'rgba(0,0,0,.2)'; c.fillRect(x + 1, y + s - 3, s - 2, 2); c.fillRect(x + s - 3, y + 1, 2, s - 2);
+      c.fillStyle = 'rgba(255,255,255,.18)'; c.fillRect(x + 1, y + 1, s - 2, 1.5);
+      if (s >= 14) { c.strokeStyle = lum(B.pal[v - 1]) > 0.6 ? 'rgba(80,60,40,.45)' : 'rgba(255,255,255,.5)'; c.lineWidth = 1; c.setLineDash(L.dashA); c.strokeRect(x + 3.5, y + 3.5, s - 7, s - 7); c.setLineDash(L.dash0); }
+      if (lk === 2) { c.strokeStyle = '#c0283f'; c.lineWidth = 2; c.strokeRect(x + 2, y + 2, s - 4, s - 4); }
+    } else if (v === PIN && !B.done) {
+      var red = lk === 2;
+      if (red) { c.fillStyle = 'rgba(192,40,63,.14)'; c.fillRect(x + 1, y + 1, s - 2, s - 2); }
+      c.strokeStyle = red ? '#c0283f' : 'rgba(80,84,92,.85)'; c.lineWidth = Math.max(1.2, s * 0.07); c.lineCap = 'round';
+      c.beginPath(); c.moveTo(x + s * 0.28, y + s * 0.72); c.lineTo(x + s * 0.66, y + s * 0.34); c.stroke();
+      if (red) { c.beginPath(); c.moveTo(x + s * 0.28, y + s * 0.3); c.lineTo(x + s * 0.7, y + s * 0.72); c.stroke(); }
+      c.fillStyle = red ? '#c0283f' : lk === 1 ? '#d9a441' : '#a8324a'; c.beginPath(); c.arc(x + s * 0.68, y + s * 0.32, Math.max(1.6, s * 0.12), 0, 7); c.fill();
+      c.lineCap = 'butt';
+    }
+    if (lk === 1 && s >= 12) { /* a given: a little bow */
+      c.fillStyle = '#d9a441'; var bx = x + s * 0.8, by = y + s * 0.2, r = s * 0.12;
+      c.beginPath(); c.moveTo(bx, by); c.lineTo(bx - r, by - r * 0.7); c.lineTo(bx - r, by + r * 0.7); c.closePath(); c.fill();
+      c.beginPath(); c.moveTo(bx, by); c.lineTo(bx + r, by - r * 0.7); c.lineTo(bx + r, by + r * 0.7); c.closePath(); c.fill();
+      c.fillStyle = '#8a6416'; c.beginPath(); c.arc(bx, by, r * 0.35, 0, 7); c.fill();
+    }
+  }
+  function paintClues(B) {
+    var L = B.L, cs = L.cs, p = B.p, k = p.k, U = 0.74 * cs, fs = Math.max(9, Math.round(cs * (k > 1 ? 0.48 : 0.52)));
+    var rc = L.row.getContext('2d'), cc = L.col.getContext('2d');
+    [rc, cc].forEach(function (c) { c.setTransform(L.d, 0, 0, L.d, 0, 0); c.textAlign = 'center'; c.textBaseline = 'middle'; c.font = '700 ' + fs + 'px ' + FONT; });
+    rc.clearRect(0, 0, L.rw, p.h * cs); cc.clearRect(0, 0, p.w * cs, L.ch);
+    for (var l = 0; l < B.NL; l++) {
+      var row = l < p.h, c = row ? rc : cc, ns = B.CL[l].n, cl = B.CL[l].c, idx = row ? l : l - p.h, n = Math.max(1, ns.length);
+      c.fillStyle = idx % 2 ? 'rgba(239,227,200,.92)' : 'rgba(247,240,225,.95)';
+      if (row) c.fillRect(0, idx * cs, L.rw, cs); else c.fillRect(idx * cs, 0, cs, L.ch);
+      if (idx % 5 === 4 && idx < (row ? p.h : p.w) - 1) { c.fillStyle = 'rgba(70,50,35,.4)'; if (row) c.fillRect(0, (idx + 1) * cs - 1, L.rw, 2); else c.fillRect((idx + 1) * cs - 1, 0, 2, L.ch); }
+      var done = B.lineDone[l];
+      if (B.faded[l]) {
+        var fx = row ? L.rw - 0.2 * cs - U / 2 : idx * cs + cs / 2, fy = row ? idx * cs + cs / 2 : L.ch - 0.2 * cs - U / 2;
+        c.strokeStyle = '#6f6253'; c.setLineDash(L.dashA); c.lineWidth = 1; c.strokeRect(fx - U * 0.42, fy - U * 0.42, U * 0.84, U * 0.84); c.setLineDash(L.dash0);
+        c.fillStyle = '#6f6253'; c.fillText('?', fx, fy + 1); continue;
+      }
+      c.globalAlpha = done ? 0.42 : 1;
+      for (var j = 0; j < n; j++) {
+        var x = row ? L.rw - 0.2 * cs - U * (n - j) + U / 2 : idx * cs + cs / 2, y = row ? idx * cs + cs / 2 : L.ch - 0.2 * cs - U * (n - j) + U / 2;
+        var txt = ns.length ? String(ns[j]) : '0';
+        if (k > 1 && ns.length) {
+          var col = B.pal[cl[j] - 1]; c.fillStyle = col; c.beginPath(); roundRect(c, x - U * 0.45, y - U * 0.45, U * 0.9, U * 0.9, U * 0.18); c.fill();
+          c.fillStyle = lum(col) > 0.55 ? '#2b2320' : '#fffaf0';
+        } else c.fillStyle = '#2b2320';
+        c.fillText(txt, x, y + 1);
+        if (done) { c.globalAlpha = 0.9; c.strokeStyle = '#a8324a'; c.lineWidth = Math.max(1.2, cs * 0.06); var r = U * 0.32; c.beginPath(); c.moveTo(x - r, y - r); c.lineTo(x + r, y + r); c.moveTo(x + r, y - r); c.lineTo(x - r, y + r); c.stroke(); c.globalAlpha = 0.42; }
+      }
+      c.globalAlpha = 1;
+    }
+    B.dirtyClue = false;
+  }
+  function roundRect(c, x, y, w, h, r) { c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+
+  var V0 = { cx: 0, cy: 0, vc: 0, vr: 0, gx: 0, gy: 0, cs: 1 };
+  function inX(x) { return x >= V0.cx && x < V0.cx + V0.vc; }
+  function inY(y) { return y >= V0.cy && y < V0.cy + V0.vr; }
+  function sx(x) { return V0.gx + (x - V0.cx) * V0.cs; }
+  function sy(y) { return V0.gy + (y - V0.cy) * V0.cs; }
+  /* Composite one frame of a board onto a canvas: layers (repainted only on change) + live overlays. */
+  function drawBoard(c, B, geo, t, o) {
+    o = o || {};
+    ensureLayers(B, geo);
+    if (B.dirtyGrid) paintGrid(B);
+    if (B.dirtyClue) paintClues(B);
+    var L = B.L, cs = geo.cs, d = L.d, vc = geo.vc, vr = geo.vr, gx = geo.gx, gy = geo.gy, cx0 = geo.camX, cy0 = geo.camY;
+    c.save();
+    if (o.shake) c.translate(o.shake, 0);
+    c.fillStyle = 'rgba(40,25,15,.35)'; c.fillRect(gx - geo.rw + 4, gy + 6, geo.rw + vc * cs, vr * cs); c.fillRect(gx + 4, gy - geo.ch + 6, vc * cs, geo.ch);
+    c.fillStyle = '#e9dcbd'; c.fillRect(gx - geo.rw, gy - geo.ch, geo.rw, geo.ch); c.strokeStyle = 'rgba(168,50,74,.5)'; c.setLineDash(DASH6); c.lineWidth = 1.5; c.strokeRect(gx - geo.rw + 4.5, gy - geo.ch + 4.5, geo.rw - 9, geo.ch - 9); c.setLineDash(DASH0);
+    c.drawImage(L.col, cx0 * cs * d, 0, vc * cs * d, geo.ch * d, gx, gy - geo.ch, vc * cs, geo.ch);
+    c.drawImage(L.row, 0, cy0 * cs * d, geo.rw * d, vr * cs * d, gx - geo.rw, gy, geo.rw, vr * cs);
+    c.drawImage(L.grid, cx0 * cs * d, cy0 * cs * d, vc * cs * d, vr * cs * d, gx, gy, vc * cs, vr * cs);
+    V0.cx = cx0; V0.cy = cy0; V0.vc = vc; V0.vr = vr; V0.gx = gx; V0.gy = gy; V0.cs = cs;
+    if (o.cursor && !B.done) {
+      c.fillStyle = 'rgba(63,93,125,.10)';
+      if (inY(B.cy)) c.fillRect(gx - geo.rw, sy(B.cy), geo.rw + vc * cs, cs);
+      if (inX(B.cx)) c.fillRect(sx(B.cx), gy - geo.ch, cs, geo.ch + vr * cs);
+    }
+    if (o.hover && B.hover >= 0 && !B.done) { var hx = B.hover % B.p.w, hy = Math.floor(B.hover / B.p.w); if (inX(hx) && inY(hy)) { c.strokeStyle = 'rgba(43,35,32,.35)'; c.lineWidth = 1.5; c.strokeRect(sx(hx) + 1.5, sy(hy) + 1.5, cs - 3, cs - 3); } }
+    if (o.cursor && !B.done && inX(B.cx) && inY(B.cy)) {
+      var ux = sx(B.cx), uy = sy(B.cy);
+      c.strokeStyle = '#3f5d7d'; c.lineWidth = 3; c.strokeRect(ux + 1.5, uy + 1.5, cs - 3, cs - 3);
+      c.strokeStyle = '#f7f0e1'; c.lineWidth = 1; c.strokeRect(ux + 3.5, uy + 3.5, cs - 7, cs - 7);
+      c.strokeStyle = '#8a8f99'; c.lineWidth = Math.max(1.5, cs * 0.07); c.lineCap = 'round'; c.beginPath(); c.moveTo(ux + cs * 0.82, uy + cs * 0.18); c.lineTo(ux + cs * 1.12, uy - cs * 0.12); c.stroke(); c.lineCap = 'butt';
+    }
+    c.restore();
+    /* Minimap when the patch is bigger than the window. */
+    if (geo.cam) {
+      var mpx = Math.max(1.5, Math.min((geo.rw - 12) / B.p.w, (geo.ch - 12) / B.p.h, 4)), mw = B.p.w * mpx, mh = B.p.h * mpx, mx = gx - geo.rw + (geo.rw - mw) / 2, my = gy - geo.ch + (geo.ch - mh) / 2;
+      geo.mini = { x: mx, y: my, w: mw, h: mh, s: mpx };
+      c.fillStyle = '#fbf5e7'; c.fillRect(mx - 3, my - 3, mw + 6, mh + 6); c.fillStyle = 'rgba(70,50,35,.15)'; c.fillRect(mx, my, mw, mh);
+      for (var i = 0; i < B.cells.length; i++) { var v = B.cells[i]; if (v >= 1 && v <= 4) { c.fillStyle = B.pal[v - 1]; c.fillRect(mx + (i % B.p.w) * mpx, my + Math.floor(i / B.p.w) * mpx, mpx, mpx); } }
+      c.strokeStyle = '#a8324a'; c.lineWidth = 1.5; c.strokeRect(mx + cx0 * mpx, my + cy0 * mpx, vc * mpx, vr * mpx);
+    } else geo.mini = null;
+  }
+
+  /* ── Effects: a fixed pool, no allocation per frame ─────────────────────── */
+  var NP = 240, PX = new Float32Array(NP * 6), PCOL = new Array(NP), pLive = 0;
+  function burst(x, y, n, col, spd) {
+    if (RM) return;
+    for (var k = 0, i = 0; i < NP && k < n; i++) {
+      var o = i * 6; if (PX[o + 4] > 0) continue;
+      var a = Math.random() * 6.283, v = (spd || 120) * (0.4 + Math.random() * 0.8);
+      PX[o] = x; PX[o + 1] = y; PX[o + 2] = Math.cos(a) * v; PX[o + 3] = Math.sin(a) * v - 60; PX[o + 4] = 0.5 + Math.random() * 0.5; PX[o + 5] = 2 + Math.random() * 3; PCOL[i] = col; k++; pLive++;
+    }
+  }
+  function stepFx(dt) {
+    if (!pLive) return;
+    pLive = 0;
+    for (var i = 0; i < NP; i++) { var o = i * 6; if (PX[o + 4] <= 0) continue; PX[o + 4] -= dt; PX[o] += PX[o + 2] * dt; PX[o + 1] += PX[o + 3] * dt; PX[o + 3] += 380 * dt; if (PX[o + 4] > 0) pLive++; }
+  }
+  function drawFx(c) {
+    for (var i = 0; i < NP; i++) { var o = i * 6; if (PX[o + 4] <= 0) continue; c.globalAlpha = Math.min(1, PX[o + 4] * 2); c.fillStyle = PCOL[i]; c.fillRect(PX[o] - PX[o + 5] / 2, PX[o + 1] - PX[o + 5] / 2, PX[o + 5], PX[o + 5]); }
+    c.globalAlpha = 1;
+  }
+  /* A needle running along a finished line, leaving a running stitch. */
+  var RUNS = [0, 1, 2, 3, 4, 5].map(function () { return { on: false, l: 0, t: 0, dur: 0.6, gold: false }; });
+  function needleRun(l, gold, dur) { if (RM) return; for (var i = 0; i < RUNS.length; i++) if (!RUNS[i].on) { var r = RUNS[i]; r.on = true; r.l = l; r.t = 0; r.dur = dur || 0.55; r.gold = !!gold; return; } }
+  function stepRuns(dt) { var any = false; for (var i = 0; i < RUNS.length; i++) { var r = RUNS[i]; if (!r.on) continue; r.t += dt; if (r.t > r.dur + 0.5) r.on = false; else any = true; } return any; }
+  function drawRuns(c, B, geo) {
+    for (var i = 0; i < RUNS.length; i++) {
+      var r = RUNS[i]; if (!r.on) continue;
+      var cs = geo.cs, row = r.l < B.p.h, n = row ? B.p.w : B.p.h, k = clamp(r.t / r.dur, 0, 1), fade = clamp(1 - (r.t - r.dur) / 0.5, 0, 1);
+      var x0 = row ? geo.gx - geo.camX * cs : geo.gx + (r.l - B.p.h - geo.camX) * cs + cs / 2, y0 = row ? geo.gy + (r.l - geo.camY) * cs + cs / 2 : geo.gy - geo.camY * cs;
+      var len = n * cs * k, x1 = row ? x0 + len : x0, y1 = row ? y0 : y0 + len;
+      c.save(); c.beginPath(); c.rect(geo.gx, geo.gy, geo.vc * cs, geo.vr * cs); c.clip();
+      c.globalAlpha = fade; c.strokeStyle = r.gold ? '#e8c25a' : '#fff6e0'; c.lineWidth = Math.max(2, cs * 0.1); c.setLineDash(B.L.dashA);
+      c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke(); c.setLineDash(B.L.dash0);
+      if (k < 1) { c.strokeStyle = r.gold ? '#e8c25a' : '#c9ced6'; c.lineWidth = Math.max(2, cs * 0.12); c.lineCap = 'round'; c.beginPath(); c.moveTo(x1, y1); c.lineTo(row ? x1 + cs * 0.9 : x1 + cs * 0.15, row ? y1 - cs * 0.15 : y1 + cs * 0.9); c.stroke(); }
+      c.restore();
+    }
+  }
+
+  /* ══ The voice: Grandpa Amos ═════════════════════════════════════════════════════════════ */
+  var AMOS = {
+    start: ['Count twice, stitch once.', 'Start with the big numbers — they always overlap somewhere.', '{size} by {size}. Bobbin says you’ve got this; Bobbin is asleep, but I agree.', 'A zero line is a free line: pin it all.', 'Edges first. Edges anchor the long runs.', '{picture}. I’ve been looking forward to this one.'],
+    boss: { 5: 'The Old Mill’s my favourite. Take your time with the sails.', 6: 'Two colours now. Different colours can touch — same colours can’t.', 10: 'The Summer Fair! Big tent, two threads. Long stripes first.', 11: 'Three threads now. Read the colour of every clue before you stitch.', 15: 'Harvest Supper. Big patch, big table, lots of little ones. Pins are your friends.', 16: 'Frost on the window — and on the thread. One spool fewer this winter.', 20: 'The last patch. The whole village will see it.' },
+    loss: ['Thread runs out. Patience doesn’t.', 'Let’s unpick it and start fresh.', 'Every quilter in Pinecrest has unpicked a patch. Most of them twice.', 'You were closer than it felt. Same patch, fresh thread?', 'That one reads hard. The second time is always kinder.'],
+    close: ['Last thread, last row — and it’s right.', 'One thread left and steady hands. That’s quilting.', 'One pin saved the whole column.', 'Bobbin woke up for that one.'],
+    win: ['The quilt’s growing. So are you.', 'That’s going straight on the frame.', 'Neat little stitches. Your grandmother would have liked those.', 'Look at that — {picture}!'],
+    flaw: ['Not a pin pricked. I’ll show this one at the Festival.', 'Not one pinprick. Bobbin, wake up — look at this.'],
+    faster: ['Faster than your last time on it, too.', 'Quicker than before — your eye is getting sharp.'],
+    back: ['There you are, {name}. Kettle’s on, needle’s threaded.', 'Patch {n} is waiting in the basket.', 'You’ve sewn {done} patches. The quilt’s getting heavy!', 'Snow tonight. Good night for sewing.'],
+    hello: ['Welcome to Pinecrest. I’m Amos — I sew the village quilt. Pull up a stool.', 'Ah, a new apprentice. The quilt needs twenty patches before the Winter Festival.'],
+  };
+  var amosT = 0, amosAt = -99, voiceSaid = {};
+  function fill(s, o) { return s.replace(/\{(\w+)\}/g, function (m, k) { return o[k] != null ? o[k] : m; }); }
+  function pick(list, key) { var i = ((voiceSaid[key] | 0) + Math.floor(Math.random() * Math.max(1, list.length - 1)) + 1) % list.length; voiceSaid[key] = i; return list[i]; }
+  /* kind: 'key' (always, unless Off) or 'chat' (On only). Rate-limited, never over a hint. */
+  function amos(text, kind, ms) {
+    if (S.set.voice === 'off' || !text) return;
+    if (kind !== 'key' && S.set.voice === 'fewer') return;
+    var now = performance.now() / 1000;
+    if (kind !== 'key' && now - amosAt < 7) return;
+    amosAt = now; $('amosText').textContent = ' ' + text; $('amos').classList.add('on'); amosT = (ms || Math.min(6500, 1800 + text.length * 45)) / 1000;
+    say(text);
+  }
+  function hideAmos() { $('amos').classList.remove('on'); amosT = 0; }
+
+  var toastT = 0, stampT = 0, stampAt = -99;
+  function toast(html, ms) { var t = $('toast'); t.innerHTML = html; t.classList.add('on'); toastT = (ms || 3200) / 1000; say(t.textContent); }
+  function stamp(text) { var now = performance.now() / 1000; if (now - stampAt < 3) return; stampAt = now; var s = $('stamp'); s.textContent = text; s.classList.remove('on'); void s.offsetWidth; s.classList.add('on'); stampT = 1.6; say(text); SFX.pick(); }
+  function say(t) { $('live').textContent = t; }
+
+  /* What hit you: the cause always, the tip at most twice per cause. */
+  var CAUSES = {
+    guess: ['You guessed a square', 'If a square can’t be proved, leave it; pin the ones you can prove empty.'],
+    overlap: ['The run sits elsewhere', 'For a run of N in a line of L, the middle 2N−L squares are always filled — start from those.'],
+    order: ['Runs out of order', 'Runs appear in clue order: the first clue is the leftmost (or topmost) run.'],
+    merge: ['Colour runs merged', 'Same-colour runs need a gap; different colours may touch.'],
+    colour: ['Wrong thread colour', 'A clue’s colour is its run’s colour — pick the thread (1–4) before you stitch.'],
+    big: ['Ran out of thread on a big patch', 'Finish the edges first; edges anchor the long runs.'],
+    faded: ['A faded clue', 'Finish a crossing line; the faded clue comes back.'],
+  };
+  function causeLine(c) {
+    var C = CAUSES[c]; if (!C) return { cause: '', tip: '' };
+    var n = S.tips[c] | 0; S.tips[c] = n + 1; save();
+    return { cause: C[0], tip: n < 2 ? C[1] : '' };
+  }
+
+  /* ══ Scenes: one variable, one overlay each, setScene is the only way to change screen ═══════════════ */
+  var SCENES = { title: 'sc-title', quilt: 'sc-quilt', brief: 'sc-brief', play: 'sc-play', pause: 'sc-pause', tally: 'sc-tally', lost: 'sc-lost', how: 'sc-how', free: 'sc-free', stats: 'sc-stats', settings: 'sc-settings', card: 'sc-card' };
+  var scene = 'title', backOf = {}, openerOf = {};
+  function setScene(s, from) {
+    var prev = scene;
+    if (from !== undefined) { backOf[s] = from; openerOf[s] = document.activeElement; }
+    Object.keys(SCENES).forEach(function (k) { $(SCENES[k]).classList.toggle('on', k === s); });
+    scene = s; document.body.setAttribute('data-scene', s);
+    $('back').classList.toggle('on', s !== 'title' && s !== 'play');
+    $('controlsCard').style.display = s === 'title' ? '' : 'none';
+    if (s !== 'play') { $('hint').classList.remove('on'); endStroke(); keyStroke = null; }
+    if (s === 'play') { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); layoutPlay(); }
+    if (s === 'title') layoutCabin();
+    if (s !== 'how') demoStop();
+    wake(); cabinDirty = true;
+    if (!(s === 'pause' || s === 'tally' || (prev === 'pause' && s === 'play'))) { hideAmos(); amosAt = -99; }
+    var first = SCENES[s] && s !== 'play' && $(SCENES[s]).querySelector('[tabindex="0"], button:not([disabled])');
+    if (first) first.focus({ preventScroll: true });
+    return prev;
+  }
+  function backTo(s) { var op = openerOf[scene]; setScene(s); if (op && op.isConnected && op.offsetParent) op.focus({ preventScroll: true }); }
+  /* BACK and Esc run exactly this. */
+  function goBack() {
+    if (scene === 'play') { pause(); return; }
+    if (scene === 'pause') { resume(); return; }
+    if (scene === 'title') return;
+    if (scene === 'lost') { lostChoice('quilt'); return; }
+    if (scene === 'tally') { leaveTally(backOf.tally || 'quilt'); return; }
+    if (scene === 'brief') { openQuilt(); return; }
+    var to = backOf[scene] || 'title';
+    if (to === 'title') { toTitle(); return; }
+    if (to === 'quilt') { openQuilt(); return; }
+    backTo(to);
+  }
+  $('back').onclick = goBack;
+
+  /* Roving tabindex for every list, menu and grid. */
+  function rove(box, sel, o) {
+    o = o || {};
+    var items = function () { return Array.prototype.slice.call(box.querySelectorAll(sel)); };
+    items().forEach(function (b, i) { b.tabIndex = i ? -1 : 0; });
+    box.addEventListener('focusin', function (e) {
+      var list = items(); if (list.indexOf(e.target) < 0) return;
+      list.forEach(function (x) { x.tabIndex = -1; if (o.attr) x.setAttribute(o.attr, 'false'); else x.removeAttribute('aria-current'); });
+      e.target.tabIndex = 0; if (o.attr) e.target.setAttribute(o.attr, 'true'); else e.target.setAttribute('aria-current', 'true');
+      if (o.onFocus) o.onFocus(e.target);
+    });
+    box.onkeydown = function (e) {
+      var list = items(), i = list.indexOf(document.activeElement); if (i < 0) return;
+      var cols = o.cols || 1, j = -1;
+      if (e.key === 'ArrowDown') j = cols > 1 ? i + cols : i + 1; else if (e.key === 'ArrowUp') j = cols > 1 ? i - cols : i - 1;
+      else if (e.key === 'ArrowRight') j = cols > 1 || o.horiz ? i + 1 : -1; else if (e.key === 'ArrowLeft') j = cols > 1 || o.horiz ? i - 1 : -1;
+      else if (e.key === 'Home') j = 0; else if (e.key === 'End') j = list.length - 1;
+      else return;
+      e.preventDefault();
+      if (cols === 1) j = (j + list.length) % list.length; else j = clamp(j, 0, list.length - 1);
+      if (list[j]) list[j].focus();
+    };
+  }
+  function decorate() { document.querySelectorAll('.patch').forEach(function (p) { if (p.querySelector(':scope > .xs')) return; ['tl', 'tr', 'bl', 'br'].forEach(function (k) { var i = document.createElement('i'); i.className = 'xs ' + k; i.setAttribute('aria-hidden', 'true'); p.appendChild(i); }); }); }
+
+  /* ── The title: one menu array ───────────────────────────────────────── */
+  function contLabel() {
+    if (S.run && S.run.mode === 'camp' && MISSIONS[S.run.n]) return 'Continue · Patch ' + S.run.n + ' · ' + MISSIONS[S.run.n].name + ' · ' + clearedCount() + ' / 20';
+    var n = nextMission();
+    if (!n) return 'The quilt is finished · 20 / 20';
+    return (clearedCount() ? 'Continue · Patch ' : 'Begin stitching · Patch ') + n + ' · ' + MISSIONS[n].name + ' · ' + clearedCount() + ' / 20';
+  }
+  var TITLE_MENU = [
+    { label: contLabel, hint: function () { return S.run && S.run.mode === 'camp' ? 'Your patch is still on the frame' : nextMission() ? MISSIONS[nextMission()].goal : 'Midnight Sewing is open on every patch'; }, primary: true, act: function () { cont(); } },
+    { label: function () { return 'The Story Quilt'; }, hint: function () { return clearedCount() + ' of 20 patches sewn · ' + rankOf(clearedCount()); }, cls: 'gingham', act: function () { openQuilt(true); } },
+    { label: function () { return 'Daily patch'; }, hint: function () { var d = S.daily; return d.best[todayKey()] != null ? 'Sewn today in ' + mmss(d.best[todayKey()]) + ' · streak ' + d.streak : 'A new little picture every day' + (d.streak ? ' · streak ' + d.streak : ''); }, cls: 'dots', act: function () { startDaily(); } },
+    { label: function () { return 'Scrap Table'; }, hint: function () { return 'Practice: 99 thread'; }, cls: 'cord', act: function () { startTraining(); } },
+    { label: function () { return 'Free sewing'; }, hint: function () { return 'Any patch you have sewn, just for joy'; }, when: function () { return clearedCount() > 0; }, act: function () { openFree(); } },
+    { label: function () { return 'How to sew'; }, util: true, act: function () { openHow('title'); } },
+    { label: function () { return 'Your sewing'; }, util: true, act: function () { openStats(); } },
+    { label: function () { return 'Settings'; }, util: true, act: function () { openSettings('title'); } },
+  ];
+  function buildTitle() {
+    var m = $('menu'); m.textContent = '';
+    var util = null;
+    TITLE_MENU.forEach(function (it, i) {
+      if (it.when && !it.when()) return;
+      var b = document.createElement('button'); b.setAttribute('role', 'menuitem'); b.className = 'tag' + (it.primary ? ' primary' : '') + (it.cls ? ' ' + it.cls : '') + (it.util ? ' small' : '');
+      b.style.setProperty('--tilt', ((i * 37) % 5 - 2) * 0.5 + 'deg');
+      b.textContent = it.label();
+      if (it.hint) { var s = document.createElement('small'); s.textContent = it.hint(); b.appendChild(s); }
+      b.onclick = function () { SFX.pick(); it.act(); };
+      if (it.util) { if (!util) { util = document.createElement('div'); util.className = 'util'; util.setAttribute('role', 'none'); m.appendChild(util); } util.appendChild(b); } else m.appendChild(b);
+    });
+    rove(m, '[role=menuitem]', {});
+    greet();
+  }
+  function greet() {
+    var g = $('greet'); g.textContent = '';
+    var t = document.createElement('div'), done = clearedCount();
+    t.textContent = done ? 'Welcome back, apprentice · ' + rankOf(done) + ' · ' + done + ' / 20 patches' + (S.lastWin ? ' · last: ' + S.lastWin : '') : 'Welcome to Pinecrest, apprentice. Press “Begin stitching” — Amos will show you the first stitch.';
+    g.appendChild(t);
+  }
+  function toTitle() { G = null; RUN = null; setScene('title'); buildTitle(); $('menu').querySelector('[role=menuitem]').focus({ preventScroll: true }); }
+  function cont() {
+    if (S.run && S.run.mode === 'camp' && MISSIONS[S.run.n]) { resumeRun(); return; }
+    var n = nextMission(); if (n) openBrief(n, 'title'); else openQuilt(true);
+  }
+  $('seeIt').onclick = function () { openHow('title'); };
+
+  /* ── The quilt (the map): every patch a button ── */
+  function openQuilt(fromTitle) { buildQuilt(); setScene('quilt', fromTitle ? 'title' : 'title'); var nx = $('qgrid').querySelector('.next') || $('qgrid').querySelector('.pt'); if (nx) nx.focus({ preventScroll: true }); }
+  function buildQuilt() {
+    var g = $('qgrid'); g.textContent = '';
+    var nx = nextMission(), done = clearedCount();
+    $('qprog').textContent = done + ' of 20 patches · ' + rankOf(done) + (S.cleared[20] ? ' · Midnight Sewing open' : '');
+    for (var a = 1; a <= 4; a++) {
+      var sea = document.createElement('div'); sea.className = 'season'; sea.style.background = ACTS[a].c; sea.textContent = ACTS[a].name; sea.setAttribute('role', 'rowheader'); g.appendChild(sea);
+      for (var i = 0; i < 6; i++) {
+        var n = (a - 1) * 5 + i + 1, b = document.createElement('button'), cv = mk(120, 120), x = cv.getContext('2d');
+        b.setAttribute('role', 'gridcell');
+        if (i === 5) {
+          var ready = !!S.portraits[a];
+          b.className = 'pt portrait' + (ready ? ' ready' : ''); x.fillStyle = '#f1e6cf'; x.fillRect(0, 0, 120, 120);
+          if (!drawPortrait(x, a, 12, 12, 96)) { x.strokeStyle = 'rgba(90,70,50,.3)'; x.setLineDash([5, 5]); x.beginPath(); x.arc(60, 60, 34, 0, 7); x.stroke(); }
+          b.appendChild(cv);
+          var nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = ready ? 'Your portrait' : 'Portrait patch'; b.appendChild(nm);
+          var rw = document.createElement('div'); rw.className = 'rw'; rw.textContent = ready ? 'Quilt Card ›' : 'Sew ' + ACTS[a].name + ' to earn it'; b.appendChild(rw);
+          b.setAttribute('aria-label', ready ? 'Your portrait patch for ' + ACTS[a].name + ' — open the Quilt Card' : 'Portrait patch for ' + ACTS[a].name + ' — sew all of ' + ACTS[a].name + ' to earn it');
+          if (!ready) b.setAttribute('aria-disabled', 'true');
+          b.onclick = (function (act) { return function () { if (S.portraits[act]) openCard(act, 'quilt'); }; })(a);
+        } else {
+          var m = MISSIONS[n], sewn = !!S.cleared[n], open = isOpen(n);
+          b.className = 'pt' + (sewn ? ' sewn' : '') + (!open ? ' locked' : '') + (n === nx ? ' next' : '') + (m.boss ? ' boss' : '');
+          x.fillStyle = sewn ? '#fbf5e7' : '#f3ead6'; x.fillRect(0, 0, 120, 120);
+          drawMission(x, n, 0, 0, 120, { sketch: !sewn });
+          if (S.mid[n]) { x.fillStyle = '#1f2a55'; x.beginPath(); x.arc(106, 14, 9, 0, 7); x.fill(); x.fillStyle = '#e8c25a'; x.beginPath(); x.arc(109, 12, 6, 0, 7); x.fill(); }
+          b.appendChild(cv);
+          var nm2 = document.createElement('div'); nm2.className = 'nm'; nm2.textContent = n + ' · ' + m.name; b.appendChild(nm2);
+          var rw2 = document.createElement('div'); rw2.className = 'rw';
+          var state = !open ? 'Sew patch ' + (n - 1) + ' first' : sewn ? 'Sewn' + (S.flaw[n] ? ' · not a pin pricked' : '') : 'Open';
+          rw2.textContent = state; b.appendChild(rw2);
+          b.setAttribute('aria-label', 'Patch ' + n + ', ' + m.name + '. ' + state);
+          if (!open) b.setAttribute('aria-disabled', 'true');
+          b.onclick = (function (k) { return function () { if (isOpen(k)) openBrief(k, 'quilt'); else toast('That patch opens once <b>' + MISSIONS[k - 1].name + '</b> is sewn.'); }; })(n);
+        }
+        g.appendChild(b);
+      }
+    }
+    rove(g, '.pt', { cols: 6 });
+    var f = $('qfoot'); f.innerHTML = '';
+    var tip = document.createElement('span'); tip.textContent = 'Patches open in order. ✶ marks a centrepiece. A portrait patch is stitched in when a season is done.';
+    f.appendChild(tip);
+  }
+
+  /* ── The brief: the stated challenge, difficulty, Amos's word ───────── */
+  var briefN = 1, briefDiff = 1, briefMid = false;
+  function openBrief(n, from) {
+    briefN = n; briefDiff = S.lastDiff | 0; briefMid = false;
+    paintBrief(); setScene('brief', from || 'quilt');
+    $('bgo').focus({ preventScroll: true });
+  }
+  function paintBrief() {
+    var n = briefN, m = MISSIONS[n], d0 = BYID[m.p[0]], rows = d0.art.split('|'), size = rows[0].length + '×' + rows.length, k = d0.pal.length;
+    $('bttl').textContent = 'Patch ' + n + ' · ' + m.name;
+    $('bsub').textContent = ACTS[actOf(n)].name + (m.boss ? ' · centrepiece' : '') + ' · ' + (m.p.length > 1 ? m.p.length + ' patches of ' : '') + size + ' · ' + (k > 1 ? k + ' threads' : 'one thread');
+    var pc = $('briefPic').getContext('2d'); pc.clearRect(0, 0, 240, 240); pc.fillStyle = '#fbf5e7'; pc.fillRect(0, 0, 240, 240); drawMission(pc, n, 0, 0, 240, { sketch: !S.cleared[n] });
+    var truth = S.set.check === 'true' || briefMid, th = threadFor(n, briefDiff);
+    var facts = [['Challenge', m.goal + (m.p.length > 1 ? ' (' + m.p.length + ')' : '')], ['Thread', truth ? 'none — True checking counts mistakes when the grid is full' : th + (actOf(n) === 4 ? ' (frost: one fewer)' : '') + ' per patch'], ['Par', mmss(m.par)],
+      ['Best', S.best[n] ? mmss(S.best[n]) + (S.flaw[n] ? ' · not a pin pricked' : '') : 'not sewn yet']];
+    if (bandOf(n) === 4) facts.push(['Faded clues', 'a few clues show “?” until a crossing line is finished']);
+    var dl = $('bfacts'); dl.textContent = '';
+    facts.forEach(function (f) { var dt = document.createElement('dt'); dt.textContent = f[0]; var dd = document.createElement('dd'); dd.textContent = f[1]; dl.appendChild(dt); dl.appendChild(dd); });
+    var line = (AMOS.boss[n] || '') || fill(pick(AMOS.start, 'brief'), { size: rows[0].length, picture: m.name });
+    $('bamos').textContent = '“' + line + '” — Amos. Tip: ' + m.tip;
+    var dg = $('diffs'); dg.textContent = '';
+    DIFFS.forEach(function (d, i) {
+      var b = document.createElement('button'); b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', String(i === briefDiff)); b.tabIndex = i === briefDiff ? 0 : -1;
+      b.textContent = d.name; var s = document.createElement('small'); s.textContent = (truth ? 'True checking' : threadFor(n, i) + ' thread') + (i === 2 ? ' · no row glow' : ''); b.appendChild(s);
+      b.onclick = function () { briefDiff = i; paintBrief(); dg.querySelectorAll('[role=radio]')[i].focus(); };
+      dg.appendChild(b);
+    });
+    dg.onkeydown = function (e) { if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return; e.preventDefault(); briefDiff = (briefDiff + (e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : 2)) % 3; paintBrief(); dg.querySelectorAll('[role=radio]')[briefDiff].focus(); };
+    var mr = $('midRow'); mr.textContent = '';
+    if (S.cleared[20]) {
+      var mb = document.createElement('button'); mb.className = 'btn'; mb.setAttribute('role', 'switch'); mb.setAttribute('aria-checked', String(briefMid));
+      mb.textContent = (briefMid ? '☾ Midnight Sewing: on' : '☾ Midnight Sewing: off'); mb.title = 'The patch mirrored and re-coloured by moonlight, True checking, Brisk';
+      mb.onclick = function () { briefMid = !briefMid; if (briefMid) briefDiff = 2; paintBrief(); $('midRow').querySelector('button').focus(); };
+      mr.appendChild(mb); var sp = document.createElement('span'); sp.className = 'dim'; sp.textContent = briefMid ? 'Mirrored, moonlit, True checking, Brisk stitches.' : 'The top tier: every patch mirrored by moonlight.'; mr.appendChild(sp);
+    }
+    $('bnote').textContent = S.run && S.run.mode === 'camp' && S.run.n !== n ? 'Starting this puts Patch ' + S.run.n + ' back in the basket (unpicked).' : '';
+  }
+  $('bgo').onclick = function () { S.lastDiff = briefDiff; save(); startMission(briefN, briefMid ? 2 : briefDiff, { mid: briefMid }); };
+
+  /* ══ Runs: campaign, daily, free, the Scrap Table ═══════════════════════════ */
+  var G = null, RUN = null;   // G: the board on the frame; RUN: the mission it belongs to
+  function startMission(n, diff, o) {
+    o = o || {};
+    if (S.run && S.run.mode === 'camp') { S.run = null; save(); }
+    RUN = { n: n, diff: diff, mid: !!o.mid, pi: 0, pricks: 0, time: 0, at: Date.now(), maxStreak: 0 };
+    loadPatch(0);
+    var m = MISSIONS[n];
+    amos(AMOS.boss[n] && !o.mid ? AMOS.boss[n] : fill(pick(AMOS.start, 'start'), { size: G.p.w, picture: m.name }), AMOS.boss[n] ? 'key' : 'chat');
+    if (n === 1 && !o.mid) hintNext();
+    if (n === 6 && !S.hints.colour) showHint('colour');
+  }
+  function loadPatch(pi, restore) {
+    var n = RUN.n, id = MISSIONS[n].p[pi], def = BYID[id];
+    if (RUN.mid) def = Q.transform(def, { mirror: true });
+    var truth = RUN.mid || S.set.check === 'true';
+    G = makeBoard(def, { trueMode: truth, brisk: RUN.diff === 2, mid: RUN.mid });
+    G.mode = 'camp'; G.n = n; G.diff = RUN.diff; G.pi = pi; G.npi = MISSIONS[n].p.length;
+    G.thread = G.threadMax = truth ? 0 : threadFor(n, RUN.diff); G.pricks = 0; G.time = 0; G.par = MISSIONS[n].par / MISSIONS[n].p.length; G.streak = 0;
+    if (restore) applyRestore(restore);
+    RUN.pi = pi;
+    boardReady();
+    setScene('play');
+    saveRun();
+  }
+  function boardReady() {
+    G.undo = []; G.lostCause = '';
+    for (var l = 0; l < G.NL; l++) G.lineDone[l] = lineMatches(G, l) ? 1 : 0;
+    G.dirtyGrid = G.dirtyClue = true; G.geo = null;
+    paintPalette(); paintThread(); paintHud();
+    $('trainBox').classList.toggle('on', G.mode === 'train');
+  }
+  function saveRun() {
+    if (!G || G.mode !== 'camp' || G.done || !RUN) return;
+    S.run = { mode: 'camp', n: RUN.n, diff: RUN.diff, mid: RUN.mid, pi: G.pi, cells: Array.prototype.join.call(G.cells, ','), lock: Array.prototype.join.call(G.lock, ''),
+      faded: Array.prototype.join.call(G.faded, ''), thread: G.thread, threadMax: G.threadMax, pricks: G.pricks, ptime: G.time, colour: G.colour, cx: G.cx, cy: G.cy,
+      R: { pricks: RUN.pricks, time: RUN.time, maxStreak: RUN.maxStreak } };
+    save();
+  }
+  function applyRestore(r) {
+    var cells = String(r.cells).split(','); for (var i = 0; i < G.cells.length && i < cells.length; i++) G.cells[i] = cells[i] | 0;
+    for (i = 0; i < G.lock.length && i < r.lock.length; i++) G.lock[i] = r.lock.charCodeAt(i) - 48;
+    if (r.faded) for (i = 0; i < G.NL && i < r.faded.length; i++) G.faded[i] = r.faded.charCodeAt(i) - 48;
+    G.thread = r.thread; G.threadMax = r.threadMax; G.pricks = r.pricks | 0; G.time = r.ptime || 0; G.colour = clamp(r.colour | 0 || 1, 1, G.p.k); G.cx = r.cx | 0; G.cy = r.cy | 0;
+  }
+  function resumeRun() {
+    var r = S.run;
+    RUN = { n: r.n, diff: r.diff, mid: !!r.mid, pi: r.pi, pricks: r.R.pricks | 0, time: r.R.time || 0, maxStreak: r.R.maxStreak | 0, at: Date.now() };
+    loadPatch(r.pi, r);
+    amos(fill(pick(AMOS.back, 'back'), { name: 'apprentice', n: r.n, done: clearedCount() }), 'key');
+    if (G.thread <= 0 && !G.trueMode) unravel();
+  }
+  function scrapBoard(i) {
+    G = makeBoard(BYID[SCRAPS[i % SCRAPS.length]], {}); G.mode = 'train'; G.n = 0; G.diff = 1; G.pi = i; G.npi = 1;
+    G.thread = G.threadMax = 99; G.pricks = 0; G.time = 0; G.par = 60; G.streak = 0;
+    boardReady(); setScene('play');
+  }
+  var TRAIN = null;
+  var CHECK = [['move', 'Move the needle'], ['stitch', 'Stitch a square'], ['run', 'Stitch a whole run'], ['pin', 'Pin an empty square'], ['colour', 'Change thread colour'], ['undo', 'Unpick'],
+    ['patch', 'Sew a whole scrap']];
+  function startTraining(first) {
+    RUN = null; TRAIN = { done: {}, first: first || '', i: 0, at: Date.now(), complete: false };
+    scrapBoard(first === 'colour' ? 2 : 0);
+    paintChecklist();
+    amos('The Scrap Table. Nothing here counts and the thread never runs out. Try everything.', 'key');
+  }
+  function tick(k) {
+    if (!G || G.mode !== 'train' || !TRAIN || TRAIN.done[k]) return;
+    TRAIN.done[k] = 1; paintChecklist();
+    if (!TRAIN.complete && CHECK.every(function (c) { return TRAIN.done[c[0]]; })) { TRAIN.complete = true; stamp('Scrap Table complete!'); amos('That’s every stitch and every tool. You’re ready for the quilt.', 'key'); SFX.box(); }
+  }
+  function paintChecklist() {
+    var ul = $('checklist'); ul.textContent = '';
+    var list = TRAIN && TRAIN.first ? CHECK.slice().sort(function (a, b) { return (b[0] === TRAIN.first) - (a[0] === TRAIN.first); }) : CHECK;
+    list.forEach(function (c) { var li = document.createElement('li'); li.textContent = c[1]; if (TRAIN && TRAIN.done[c[0]]) li.className = 'done'; ul.appendChild(li); });
+    var ks = $('keyshow'); if (!ks.firstChild) ['←', '↑', '→', '↓', 'Space', 'X', '1', '2', 'Z'].forEach(function (k) { var e = document.createElement('kbd'); e.textContent = k; e.dataset.k = k; ks.appendChild(e); });
+  }
+  var KEYLIT = { ArrowLeft: '←', ArrowUp: '↑', ArrowRight: '→', ArrowDown: '↓', Space: 'Space', KeyX: 'X', Digit1: '1', Digit2: '2', KeyZ: 'Z' };
+  function lightKey(code, on) { if (!G || G.mode !== 'train') return; var k = KEYLIT[code]; if (!k) return; var e = $('keyshow').querySelector('[data-k="' + k + '"]'); if (e) e.classList.toggle('lit', on); }
+
+  function todayKey() { var d = new Date(); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
+  function startDaily() {
+    RUN = null;
+    var day = Math.floor((Date.now() - new Date().getTimezoneOffset() * 60000) / 86400000), def = DAILY[day % DAILY.length];
+    if (Math.floor(day / DAILY.length) % 2) def = Q.transform(def, { mirror: true });
+    G = makeBoard(def, { trueMode: S.set.check === 'true' }); G.mode = 'daily'; G.n = 0; G.diff = 1; G.pi = 0; G.npi = 1;
+    G.thread = G.threadMax = G.trueMode ? 0 : 3; G.pricks = 0; G.time = 0; G.par = 240; G.streak = 0;
+    boardReady(); setScene('play');
+    amos('Today’s little patch. Nothing rides on it but your streak.', 'chat');
+  }
+  function openFree() {
+    var box = $('freeList'); box.textContent = '';
+    for (var n = 1; n <= NM; n++) if (S.cleared[n]) MISSIONS[n].p.forEach(function (id) {
+      var b = document.createElement('button'); b.setAttribute('role', 'option'); var c = mk(92, 92); drawPic(c.getContext('2d'), BYID[id], 4, 4, 84); b.appendChild(c);
+      var t = document.createElement('div'); t.innerHTML = '<b></b><br><span class="dim"></span>'; t.querySelector('b').textContent = BYID[id].name; t.querySelector('span').textContent = 'Patch ' + n + ' · ' + ACTS[actOf(n)].name; b.appendChild(t);
+      var r = document.createElement('span'); r.className = 'dim'; r.textContent = 'Sew ›'; b.appendChild(r);
+      b.onclick = function () { startFree(id); }; box.appendChild(b);
+    });
+    rove(box, '[role=option]', { attr: 'aria-selected' });
+    setScene('free', 'title');
+  }
+  function startFree(id) {
+    RUN = null; G = makeBoard(BYID[id], { trueMode: S.set.check === 'true', noFade: false }); G.mode = 'free'; G.n = 0; G.diff = 1; G.pi = 0; G.npi = 1;
+    G.thread = G.threadMax = G.trueMode ? 0 : 3; G.pricks = 0; G.time = 0; G.par = 300; G.streak = 0;
+    boardReady(); setScene('play');
+  }
+
+  /* ══ Stitching ═══════════════════════════════════════════════════════════════════════════════════════ */
+  var ST = null, keyStroke = null, pend = null;
+  function beginStroke(tool, i) {
+    if (!G || G.done || G.hanging) return;
+    var v = G.cells[i];
+    if (G.lock[i]) { G.cx = i % G.p.w; G.cy = Math.floor(i / G.p.w); wake(); return; }
+    var kind = tool === 'pin' ? (v === 0 ? 'pin' : v === PIN ? 'unpin' : null) : (v === 0 ? 'fill' : v >= 1 && v <= 4 ? 'clear' : v === PIN ? 'unpin' : null);
+    if (!kind) return;
+    ST = { kind: kind, start: i, axis: 0, last: i, changes: [], lines: {}, n: 0, stop: false };
+    applyAt(i);
+  }
+  function extendStroke(j) {
+    if (!ST || ST.stop || j === ST.last) return;
+    var w = G.p.w, sx = ST.start % w, sy = Math.floor(ST.start / w), jx = j % w, jy = Math.floor(j / w);
+    if (!ST.axis) { if (jy === sy && jx !== sx) ST.axis = 1; else if (jx === sx && jy !== sy) ST.axis = 2; else ST.axis = Math.abs(jx - sx) >= Math.abs(jy - sy) ? 1 : 2; }
+    var tx = ST.axis === 1 ? jx : sx, ty = ST.axis === 2 ? jy : sy, lx = ST.last % w, ly = Math.floor(ST.last / w);
+    while ((lx !== tx || ly !== ty) && !ST.stop) { lx += Math.sign(tx - lx); ly += Math.sign(ty - ly); ST.last = ly * w + lx; applyAt(ST.last); }
+  }
+  function applyAt(i) {
+    var v = G.cells[i], k = ST.kind;
+    G.cx = i % G.p.w; G.cy = Math.floor(i / G.p.w);
+    if (G.lock[i]) return;
+    if (k === 'fill' && v === 0) { if (!G.trueMode && G.p.cells[i] !== G.colour) { prick(i, G.colour); if (ST) ST.stop = true; return; } change(i, G.colour); SFX.tuk(); ST.n++; tick('stitch'); if (ST.n >= 2) tick('run'); hintDone('stitch'); if (ST.n >= 3) hintDone('run'); }
+    else if (k === 'clear' && v >= 1 && v <= 4) { change(i, 0); SFX.undo(); }
+    else if (k === 'pin' && v === 0) { change(i, PIN); SFX.pin(); tick('pin'); hintDone('pin'); }
+    else if (k === 'unpin' && v === PIN) { change(i, 0); SFX.undo(); }
+    follow(G, G.geo);
+  }
+  function change(i, nv) {
+    var before = G.cells[i]; if (before === nv) return;
+    G.cells[i] = nv; if (ST) ST.changes.push(i, before, nv);
+    G.dirtyGrid = true; wake();
+    if (nv >= 1 && nv <= 4 && !RM && G.geo) { var cs = G.geo.cs; burst(G.geo.gx + (i % G.p.w - G.geo.camX + 0.5) * cs, G.geo.gy + (Math.floor(i / G.p.w) - G.geo.camY + 0.5) * cs, 3, G.pal[nv - 1], 70); }
+    checkLines(i);
+  }
+  function endStroke() {
+    if (!ST || !G) { ST = null; return; }
+    var s = ST; ST = null;
+    if (s.changes.length) { G.undo.push(s.changes); if (G.undo.length > 200) G.undo.shift(); }
+    Object.keys(s.lines).forEach(function (l) { if (s.lines[l] >= 3 && G.lineDone[l]) stamp('One stroke — clean as a whistle.'); });
+    afterChange();
+  }
+  function afterChange() {
+    if (!G) return;
+    if (G.mode === 'camp') saveRun();
+    checkWin();
+    paintHud();
+  }
+  function undo() {
+    if (!G || G.done || G.hanging || !G.undo.length) return;
+    var ch = G.undo.pop();
+    for (var j = ch.length - 3; j >= 0; j -= 3) { var i = ch[j]; if (!G.lock[i]) { G.cells[i] = ch[j + 1]; checkLines(i); } }
+    G.dirtyGrid = true; SFX.undo(); tick('undo'); hintDone('undo'); afterChange(); wake();
+  }
+  function checkLines(i) {
+    var x = i % G.p.w, y = Math.floor(i / G.p.w);
+    lineCheck(y); lineCheck(G.p.h + x);
+  }
+  function lineCheck(l) {
+    var ok = lineMatches(G, l);
+    if (ok === !!G.lineDone[l]) return;
+    G.lineDone[l] = ok ? 1 : 0; G.dirtyClue = true; G.dirtyGrid = true;
+    if (!ok) return;
+    if (ST) ST.lines[l] = (ST.lines[l] | 0) + 0;
+    if (ST) { var idx = G.LIDX[l], n = 0; for (var t = 0; t < idx.length; t++) for (var j = 0; j < ST.changes.length; j += 3) if (ST.changes[j] === idx[t] && ST.changes[j + 2] >= 1 && ST.changes[j + 2] <= 4) n++; ST.lines[l] = n; }
+    needleRun(l, false, G.n === 1 && !S.st.lines ? 1.1 : 0.55); SFX.swish();
+    S.st.lines = (S.st.lines | 0) + 1;
+    if (G.n === 1 && S.st.lines === 1) amos('That’s your first line. See the needle run along it? That’s how a quilt gets made — one line at a time.', 'key');
+    G.streak++; if (RUN) RUN.maxStreak = Math.max(RUN.maxStreak, G.streak);
+    if (G.streak === 5 || G.streak === 12) stamp(G.streak === 5 ? 'Five lines, not a pin pricked' : 'Twelve clean lines!');
+    if (G.liftWatch && G.liftWatch[l] && !G.liftWatch[l].pricked) { stamp('You read the faded line first try'); G.liftWatch[l] = null; }
+    /* gentle: a finished line's other squares can only be empty — pin them */
+    if (!G.trueMode) { var ix = G.LIDX[l]; for (var q = 0; q < ix.length; q++) if (G.cells[ix[q]] === 0) { var b4 = 0; G.cells[ix[q]] = PIN; if (ST) ST.changes.push(ix[q], b4, PIN); var x = ix[q] % G.p.w, y = Math.floor(ix[q] / G.p.w); var o = l < G.p.h ? G.p.h + x : y; var okk = lineMatches(G, o); if (okk !== !!G.lineDone[o]) { G.lineDone[o] = okk ? 1 : 0; } } }
+    /* a finished line brings back faded clues that cross it */
+    var lifted = 0;
+    for (var f = 0; f < G.NL; f++) if (G.faded[f] && ((l < G.p.h) !== (f < G.p.h))) { G.faded[f] = 0; lifted++; G.liftWatch = G.liftWatch || {}; G.liftWatch[f] = { pricked: false }; }
+    if (lifted) { toast('A faded clue comes back — ' + lifted + ' line' + (lifted > 1 ? 's' : '') + ' readable again.'); G.dirtyClue = true; }
+  }
+  function prick(i, chosen) {
+    var t = G.p.cells[i], x = i % G.p.w, y = Math.floor(i / G.p.w);
+    var cause = classify(i, chosen);
+    G.cells[i] = t === 0 ? PIN : t; G.lock[i] = 2; G.pricks++; G.streak = 0; checkLines(i);
+    if (G.liftWatch) { if (G.liftWatch[y]) G.liftWatch[y].pricked = true; if (G.liftWatch[G.p.h + x]) G.liftWatch[G.p.h + x].pricked = true; }
+    if (RUN) RUN.pricks++;
+    if (G.mode !== 'train') S.st.pricks++;
+    var saved = false;
+    if (G.mode === 'train') { saved = true; toast('<b>Pinprick.</b> Nothing is lost at the Scrap Table.'); }
+    if (!saved) G.thread--;
+    G.dirtyGrid = true; G.shake = 0.3; wake();
+    SFX.prick();
+    if (G.geo) burst(G.geo.gx + (x - G.geo.camX + 0.5) * G.geo.cs, G.geo.gy + (y - G.geo.camY + 0.5) * G.geo.cs, 10, '#c0283f', 140);
+    G.lostCause = cause;
+    if (G.mode !== 'train') { var cl = causeLine(cause); toast('<b>Pinprick — ' + cl.cause + '.</b> ' + cl.tip, 4200); }
+    if (G.mode === 'camp') saveRun();
+    paintThread(); paintHud();
+    if (G.thread <= 0 && !G.trueMode && G.mode !== 'train') { endStroke(); unravel(); }
+    else if (G.thread === 1 && !G.trueMode && G.mode !== 'train') amos('Last thread. Only stitch what you can prove.', 'chat');
+  }
+  function classify(i, chosen) {
+    var t = G.p.cells[i], x = i % G.p.w, y = Math.floor(i / G.p.w), rl = y, cl = G.p.h + x;
+    if (G.faded[rl] || G.faded[cl]) return 'faded';
+    if (t && t !== chosen) return 'colour';
+    if (G.p.k > 1) { var w = G.p.w, nb = [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < G.p.h - 1 ? i + w : -1]; for (var j = 0; j < 4; j++) if (nb[j] >= 0 && G.p.cells[nb[j]] === chosen) return 'merge'; }
+    var k = know(G), pr = Q.proofs(G.p, k, G.CL), proved = false;
+    pr.forEach(function (p) { if (p.line === rl || p.line === cl) p.cells.forEach(function (c) { if (c.i === i) proved = true; }); });
+    if (!proved) return 'guess';
+    return G.CL[rl].n.length <= 1 ? 'overlap' : 'order';
+  }
+  function checkWin() {
+    if (!G || G.done) return;
+    if (G.trueMode) {
+      if (filledCount(G) < G.p.filled) return;
+      var wrong = 0;
+      for (var i = 0; i < G.cells.length; i++) { var v = G.cells[i], t = G.p.cells[i]; if (v >= 1 && v <= 4 && v !== t) { G.cells[i] = t === 0 ? PIN : t; G.lock[i] = 2; wrong++; checkLines(i); } }
+      if (wrong) { G.pricks += wrong; if (RUN) RUN.pricks += wrong; if (G.mode !== 'train') S.st.pricks += wrong; G.dirtyGrid = true; SFX.prick(); toast('<b>The grid is full — ' + wrong + ' pinprick' + (wrong > 1 ? 's' : '') + ' found.</b> They are marked in red; keep going.', 4200); if (G.mode === 'camp') saveRun(); paintHud(); return; }
+    }
+    if (correctCount(G) !== G.p.filled) return;
+    patchSewn();
+  }
+
+  function setColour(v) { if (!G || v < 1 || v > G.p.k) return; if (G.colour !== v) { G.colour = v; tick('colour'); hintDone('colour'); SFX.pick(); } paintPalette(); }
+
+  /* ── The apron: tools, palette; the HUD strip ─────────────────── */
+  function paintPalette() {
+    var p = $('pal'); p.textContent = '';
+    var k = G ? G.p.k : 1; $('palH').style.display = k > 1 ? '' : 'none'; p.style.display = k > 1 ? '' : 'none';
+    for (var v = 1; v <= k; v++) {
+      var b = document.createElement('button'); b.style.background = G.pal[v - 1]; b.setAttribute('aria-pressed', String(G.colour === v)); b.setAttribute('aria-label', 'Thread ' + v);
+      var s = document.createElement('span'); s.textContent = v; b.appendChild(s);
+      b.onclick = (function (vv) { return function () { setColour(vv); this.blur(); }; })(v);
+      p.appendChild(b);
+    }
+    $('tStitch').setAttribute('aria-pressed', String(!G || G.tool !== 'pin')); $('tPin').setAttribute('aria-pressed', String(!!G && G.tool === 'pin'));
+  }
+  var lastHud = '';
+  function paintThread() {
+    var h = $('hThread'); if (!G) return; h.textContent = '';
+    if (G.trueMode) { h.textContent = 'True checking'; h.setAttribute('aria-label', 'True checking: no thread'); return; }
+    if (G.mode === 'train') { h.textContent = '∞ thread'; return; }
+    var n = Math.max(G.thread, G.threadMax);
+    for (var i = 0; i < n; i++) { var s = document.createElement('span'); s.className = 'spool' + (i < G.thread ? '' : ' gone'); h.appendChild(s); }
+    h.setAttribute('aria-label', G.thread + ' thread left'); say(G.thread + ' thread left');
+  }
+  function paintHud() {
+    if (!G) return;
+    var name = G.mode === 'camp' ? (RUN && RUN.mid ? '☾ ' : '') + G.n + ' · ' + MISSIONS[G.n].name : G.mode === 'daily' ? 'Daily patch' : G.mode === 'train' ? 'Scrap Table' : 'Free sewing';
+    var sub = (G.npi > 1 ? ' ' + (G.pi + 1) + '/' + G.npi : '') + ' · ' + G.p.w + '×' + G.p.h;
+    var pr = (RUN ? RUN.pricks : G.pricks);
+    var key = name + sub + pr;
+    if (key === lastHud) return; lastHud = key;
+    $('hName').innerHTML = ''; $('hName').textContent = name; var sm = document.createElement('small'); sm.textContent = sub; $('hName').appendChild(sm);
+    $('hPrick').textContent = pr ? '✕ ' + pr : ''; $('hPrick').title = pr + ' pinpricks';
+  }
+  var lastSec = -1;
+  function paintTime() { if (!G) return; var s = Math.floor(G.time); if (s === lastSec) return; lastSec = s; $('hTime').textContent = mmss(s) + (G.par ? ' / ' + mmss(G.par) : ''); }
+  $('tStitch').onclick = function () { if (G) { G.tool = 'stitch'; paintPalette(); } this.blur(); };
+  $('tPin').onclick = function () { if (G) { G.tool = 'pin'; paintPalette(); tick('pin'); } this.blur(); };
+  $('tUndo').onclick = function () { undo(); this.blur(); };
+  $('hPause').onclick = function () { pause(); };
+
+  /* ── Mission-1 hints: one keycap prompt at a time, once per save ── */
+  var HINTS = {
+    move: { k: '<kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd> move the needle', t: 'Tap a square to stitch it' },
+    stitch: { k: '<kbd>Space</kbd> stitches the square under the needle', t: 'Tap a square to stitch it' },
+    pin: { k: '<kbd>X</kbd> pins a square you know is empty — pins are free', t: 'Long-press (or the Pin button) pins a square you know is empty' },
+    run: { k: 'Hold <kbd>Space</kbd> and press an arrow to stitch a whole run', t: 'Drag along a row to stitch a whole run' },
+    undo: { k: '<kbd>Z</kbd> unpicks your last stitch — never a mistake', t: '↶ unpicks your last stitch — never a mistake' },
+    colour: { k: '<kbd>1</kbd>–<kbd>4</kbd> pick the thread; a clue’s colour is its run’s colour', t: 'The palette picks the thread; a clue’s colour is its run’s colour' },
+  };
+  var HSEQ = ['move', 'stitch', 'pin', 'run', 'undo'], hintNow = '';
+  function showHint(k) { if (S.hints[k] || scene !== 'play') return; hintNow = k; $('hintText').innerHTML = TOUCH ? HINTS[k].t : HINTS[k].k; $('hint').classList.add('on'); }
+  var DID = {};
+  function hintDone(k) { DID[k] = 1; if (k === 'move' || hintNow === k) { if (!S.hints[k]) { S.hints[k] = 1; save(); } } if (hintNow === k) { $('hint').classList.remove('on'); hintNow = ''; if (G && G.n === 1 && G.mode === 'camp') setTimeout(hintNext, 500); } }
+  function hintNext() { if (!G || G.n !== 1) return; for (var i = 0; i < HSEQ.length; i++) if (!S.hints[HSEQ[i]]) { if (DID[HSEQ[i]]) { S.hints[HSEQ[i]] = 1; continue; } if (TOUCH && HSEQ[i] === 'move') { S.hints.move = 1; continue; } showHint(HSEQ[i]); return; } }
+  $('hintSkip').onclick = function () { if (hintNow) { S.hints[hintNow] = 1; save(); var k = hintNow; hintNow = ''; $('hint').classList.remove('on'); if (k !== 'colour') setTimeout(hintNext, 300); } };
+
+  /* ══ A patch sewn; a mission sewn; a patch unravelled ═══════════════════════════════════════════════ */
+  var WIN = null;
+  function patchSewn() {
+    G.done = true; endStroke();
+    for (var i = 0; i < G.cells.length; i++) if (G.cells[i] === 0) G.cells[i] = PIN;
+    if (G.mode === 'camp') { var mq = mk(240 * DPR, 168 * DPR), mx = mq.getContext('2d'); mx.setTransform(DPR, 0, 0, DPR, 0, 0); mx.fillStyle = '#4a3022'; mx.fillRect(0, 0, 240, 168); var Qm = drawQuilt(mx, 4, 4, 232, 160, {}); var sr = slotRect(Qm, G.n); var sub = G.npi > 1 ? sr.s / 2.2 : sr.s * 0.84; G.mq = { c: mq, slot: { x: sr.x + (sr.s - sub) / 2 + (G.npi > 1 ? (G.pi - 1) * sr.s * 0.3 : 0), y: sr.y + (sr.s - sub) / 2, s: sub } }; }
+    G.dirtyGrid = true;
+    SFX.box(); flare = 1;
+    var last = G.mode !== 'camp' || G.pi + 1 >= G.npi;
+    if (G.mode === 'camp') { RUN.time += G.time; }
+    var result = null;
+    if (G.mode === 'camp' && last) result = finishMission();
+    if (G.mode === 'train') { tick('patch'); }
+    WIN = { t: 0, dur: RM ? 0.7 : 2.6, last: last, result: result };
+    wake();
+  }
+  function winDone() {
+    var w = WIN; WIN = null;
+    if (G.mode === 'train') { scrapBoard(G.pi + 1); return; }
+    if (G.mode === 'camp' && !w.last) { var pi = G.pi + 1; loadPatch(pi); amos('One down. ' + (G.npi - pi) + ' to go.', 'chat'); return; }
+    showTally(w.result);
+  }
+  /* The full clear: the record is written here, at the moment of the clear (not when the results close). */
+  function finishMission() {
+    var n = RUN.n, deaths = RUN.pricks, t = RUN.time, prevBest = S.best[n], first = !S.cleared[n];
+    var rec = { n: n, deaths: deaths, t: t, prevBest: prevBest, first: first, attempts: (S.fails[n] | 0) + 1, diff: RUN.diff, mid: RUN.mid, streak: RUN.maxStreak, pricks: RUN.pricks };
+    S.cleared[n] = { d: Math.max(RUN.diff, S.cleared[n] ? S.cleared[n].d | 0 : 0), at: Date.now() };
+    if (!prevBest || t < prevBest) S.best[n] = Math.round(t);
+    if (deaths === 0) S.flaw[n] = 1;
+    if (RUN.mid) S.mid[n] = 1;
+    MISSIONS[n].p.forEach(function (id) { S.sewn[id] = 1; });
+    S.st.patches += MISSIONS[n].p.length; S.st.time += Math.round(t); if (deaths === 0) S.st.flawless++;
+    S.fails[n] = 0; S.lastWin = (deaths === 0 ? 'a flawless ' : '') + MISSIONS[n].name;
+    S.run = null; save();
+    if (n % 5 === 0 && !S.portraits[actOf(n)]) makePortrait(actOf(n));
+    RUN = null;
+    return rec;
+  }
+  function unravel() {
+    G.hanging = true; endStroke(); $('toast').classList.remove('on'); toastT = 0;
+    var n = G.n, big = G.p.w >= 15, c = big ? 'big' : G.lostCause || 'guess';
+    if (G.mode === 'camp') { S.fails[n] = (S.fails[n] | 0) + 1; save(); }
+    var cl = causeLine(c);
+    $('lttl').textContent = G.mode === 'camp' ? 'Patch ' + n + ' unravelled' : 'The patch unravelled';
+    $('lcause').innerHTML = '<b>What happened:</b> '; $('lcause').appendChild(document.createTextNode(cl.cause + '.'));
+    $('ltip').textContent = cl.tip ? 'Try this: ' + cl.tip : '';
+    $('lamos').textContent = '“' + pick(AMOS.loss, 'loss') + '” — Amos';
+    SFX.fail();
+    var list = [];
+    var stuck = G.mode === 'camp' && (S.fails[n] | 0) >= 3;
+    if (stuck) {
+      list.push({ t: 'Practise at the Scrap Table', a: 'train' });
+      if (G.diff > 0 && !(RUN && RUN.mid)) list.push({ t: 'Sew this patch on Cosy (5 thread)', a: 'cosy' });
+    }
+    list.push({ t: 'Unpick it and start again', a: 'retry', p: !list.length });
+    list.push({ t: G.mode === 'camp' ? 'Back to the quilt' : 'Back to the cabin', a: 'quilt' });
+    var m = $('lmenu'); m.textContent = '';
+    if (stuck) { var note = document.createElement('p'); note.className = 'dim'; note.style.margin = '0 0 4px'; note.textContent = 'Three tries on this one — any of these is a good way forward. Your choice.'; m.appendChild(note); }
+    list.forEach(function (o) { var b = document.createElement('button'); b.setAttribute('role', 'menuitem'); b.className = 'tag' + (o.p ? ' primary' : ''); b.textContent = o.t; b.onclick = function () { lostChoice(o.a); }; m.appendChild(b); });
+    rove(m, '[role=menuitem]');
+    setScene('lost');
+    var f = m.querySelector('[role=menuitem]'); if (f) f.focus({ preventScroll: true });
+    amos(null);
+  }
+  function lostChoice(a) {
+    if (!G) { toTitle(); return; }
+    var mode = G.mode, n = G.n, diff = G.diff, mid = RUN && RUN.mid;
+    if (mode === 'camp') { S.run = null; save(); RUN = null; }
+    if (a === 'retry' || a === 'cosy') { if (mode === 'camp') startMission(n, a === 'cosy' ? 0 : diff, { mid: mid }); else if (mode === 'daily') startDaily(); else if (mode === 'free') startFree(G.def.id.replace(/m$/, '')); return; }
+    if (a === 'train') { startTraining(); return; }
+    if (mode === 'camp') openQuilt(); else toTitle();
+  }
+
+  /* ── Patch Sewn: the summary on the left, your own patch and your own past on the right ── */
+  function showTally(rec) {
+    var g = G, from = g.mode === 'camp' ? 'quilt' : 'title';
+    $('rttl').textContent = g.mode === 'camp' ? 'Patch Sewn · ' + MISSIONS[g.n].name : g.mode === 'daily' ? 'Daily patch sewn' : 'Patch sewn';
+    var pc = $('rpic').getContext('2d'); pc.clearRect(0, 0, 520, 520); pc.fillStyle = rec && rec.mid ? '#1f2a55' : '#fbf5e7'; pc.fillRect(0, 0, 520, 520);
+    if (g.mode === 'camp') drawMission(pc, g.n, 10, 10, 500, { mid: rec && rec.mid }); else drawPic(pc, g.def, 30, 30, 460);
+    var mine = $('rmine'); mine.textContent = '';
+    $('ramos').style.display = 'none';
+    var lines = [], good = [], goal = '';
+    if (g.mode === 'camp' && rec) {
+      var t = rec.t, flaw = rec.deaths === 0;
+      $('rsub').textContent = (rec.mid ? '☾ Midnight Sewing · ' : '') + DIFFS[rec.diff].name + ' · ' + mmss(t) + (flaw ? ' · Not a pin pricked' : ' · ' + rec.pricks + ' pinprick' + (rec.pricks === 1 ? '' : 's'));
+      if (rec.prevBest) lines.push(t < rec.prevBest ? 'Faster than your best (' + mmss(rec.prevBest) + ') by ' + mmss(rec.prevBest - t) + '.' : 'Your best on this patch is still ' + mmss(rec.prevBest) + '.');
+      else lines.push(rec.attempts > 1 ? 'First time sewn — after ' + rec.attempts + ' tries. That’s how quilters are made.' : 'First time this patch is on the quilt.');
+      if (flaw) good.push('Not a pin pricked — every stitch proved'); else if (rec.pricks <= 1) good.push('Only ' + rec.pricks + ' pinprick on the whole patch');
+      if (t <= MISSIONS[g.n].par) good.push('Inside the par time (' + mmss(MISSIONS[g.n].par) + ')');
+      if (rec.streak >= 5) good.push(rec.streak + ' lines in a row without a pinprick');
+      if (!good.length) good.push('You kept going until it was sewn');
+      goal = !flaw ? 'Next: sew it again without a pinprick.' : t > MISSIONS[g.n].par ? 'Next: inside ' + mmss(MISSIONS[g.n].par) + '.' : rec.diff < 2 ? 'Next: try it on Brisk.' : S.cleared[20] && !rec.mid ? 'Next: Midnight Sewing.' : 'Next: the next patch.';
+      var aw = flaw ? pick(AMOS.flaw, 'flaw') : rec.prevBest && t < rec.prevBest ? pick(AMOS.faster, 'fast') : fill(pick(AMOS.win, 'win'), { picture: MISSIONS[g.n].name });
+      amos(aw, 'key'); $('ramos').style.display = ''; $('ramos').textContent = '“' + aw + '” — Amos';
+      if (rec.prevBest && t < rec.prevBest) stamp('New personal best!');
+    } else {
+      var tt = g.time;
+      $('rsub').textContent = mmss(tt) + (g.pricks ? ' · ' + g.pricks + ' pinprick' + (g.pricks > 1 ? 's' : '') : ' · Not a pin pricked');
+      if (g.mode === 'daily') {
+        var dk = todayKey(), prev = S.daily.best[dk];
+        if (prev == null || tt < prev) S.daily.best[dk] = Math.round(tt);
+        if (S.daily.last !== dk) { var y = new Date(Date.now() - 86400000), yk = y.getFullYear() + '-' + (y.getMonth() + 1) + '-' + y.getDate(); S.daily.streak = S.daily.last === yk ? S.daily.streak + 1 : 1; S.daily.last = dk; }
+        save(); lines.push('Daily streak: ' + S.daily.streak + ' day' + (S.daily.streak > 1 ? 's' : '') + '.'); if (prev != null) lines.push(tt < prev ? 'Faster than your earlier try today.' : 'Your best today: ' + mmss(prev) + '.');
+      }
+      good.push(g.pricks ? 'Sewn to the last stitch' : 'Not a pin pricked');
+    }
+    lines.forEach(function (l) { var p = document.createElement('p'); p.textContent = l; mine.appendChild(p); });
+    if (good.length) { var h = document.createElement('h3'); h.textContent = 'What you did well'; mine.appendChild(h); var ul = document.createElement('ul'); ul.className = 'goodlist'; good.slice(0, 2).forEach(function (s) { var li = document.createElement('li'); li.textContent = s; ul.appendChild(li); }); mine.appendChild(ul); }
+    if (goal) { var gp = document.createElement('p'); gp.className = 'dim'; gp.textContent = goal; mine.appendChild(gp); }
+    var bt = $('rbtns'); bt.textContent = '';
+    var add = function (t, f, go) { var b = document.createElement('button'); b.className = 'btn' + (go ? ' go' : ''); b.textContent = t; b.onclick = f; bt.appendChild(b); return b; };
+    if (g.mode === 'camp') {
+      var nx = g.n < NM ? g.n + 1 : 0;
+      if (nx) add('Next patch · ' + MISSIONS[nx].name, function () { openBrief(nx, 'quilt'); }, true);
+      add('See the quilt', function () { leaveTally('quilt'); }, !nx);
+      if (g.n % 5 === 0) add('Quilt Card', function () { openCard(actOf(g.n), 'tally'); });
+      add('Sew it again', function () { openBrief(g.n, 'quilt'); });
+    } else if (g.mode === 'daily') { add('Back to the cabin', function () { leaveTally('title'); }, true); }
+    else { add('Back to the cabin', function () { leaveTally('title'); }, true); }
+    setScene('tally', from);
+    var f = bt.querySelector('.go'); if (f) f.focus({ preventScroll: true });
+  }
+  function leaveTally(to) { G = null; if (to === 'quilt') openQuilt(); else toTitle(); }
+
+  /* ── Pause ───────────────────────────────────────────────────────────── */
+  var PAUSE_MENU = [
+    { label: 'Back to sewing', primary: true, act: function () { resume(); } },
+    { label: 'How to sew', act: function () { openHow('pause'); } },
+    { label: 'Settings', act: function () { openSettings('pause'); } },
+    { label: 'Unpick it and start again', when: function () { return G && G.mode !== 'train'; }, act: function () { lostChoiceFromPause('retry'); } },
+    { label: function () { return G && G.mode === 'camp' ? 'Put it aside (Continue later)' : G && G.mode === 'train' ? 'Leave the Scrap Table' : 'Leave the patch'; }, act: function () { leavePlay(); } },
+  ];
+  function buildPause() {
+    var m = $('pmenu'); m.textContent = '';
+    PAUSE_MENU.forEach(function (it) { if (it.when && !it.when()) return; var b = document.createElement('button'); b.setAttribute('role', 'menuitem'); b.className = 'tag' + (it.primary ? ' primary' : ''); b.textContent = typeof it.label === 'function' ? it.label() : it.label; b.onclick = it.act; m.appendChild(b); });
+    rove(m, '[role=menuitem]');
+    $('pinfo').textContent = G ? (G.mode === 'camp' ? 'Patch ' + G.n + ' · ' + MISSIONS[G.n].name + ' · ' : '') + mmss(G.time) + ' on this patch. The clock waits for you.' : '';
+  }
+  function pause() { if (scene !== 'play' || !G || G.done) return; endStroke(); buildPause(); setScene('pause', 'play'); }
+  function resume() { if (scene !== 'pause') return; setScene('play'); }
+  function lostChoiceFromPause(a) { if (G.mode === 'camp' && RUN) { S.run = null; save(); var n = G.n, d = G.diff, mid = RUN.mid; RUN = null; startMission(n, d, { mid: mid }); } else { if (G.mode === 'daily') startDaily(); else startFree(G.def.id.replace(/m$/, '')); } }
+  function leavePlay() {
+    if (G && G.mode === 'camp') { saveRun(); G = null; RUN = null; openQuilt(); toast('Your patch is waiting on the frame — Continue picks it up.'); return; }
+    toTitle();
+  }
+
+  /* ── Settings ───────────────────────────────────────────────────────── */
+  function openSettings(from) { paintSettings(); setScene('settings', from); }
+  function paintSettings() {
+    var box = $('setBox'); box.textContent = '';
+    var rows = [
+      ['Checking', 'check', [['gentle', 'Gentle', 'a wrong stitch is caught at once and costs thread'], ['true', 'True', 'for purists: no checks until the grid is full']]],
+      ['Grandpa Amos', 'voice', [['on', 'On'], ['fewer', 'Fewer'], ['off', 'Off']]],
+      ['Motion', 'motion', [['auto', 'Like my device'], ['reduced', 'Still'], ['full', 'Full']]],
+      ['Sound', 'sound', [[true, 'On'], [false, 'Off']]]
+    ];
+    rows.forEach(function (r) {
+      var row = document.createElement('div'); row.className = 'setrow';
+      var lab = document.createElement('div'); lab.id = 'set-' + r[1]; lab.innerHTML = '<b></b>'; lab.firstChild.textContent = r[0]; row.appendChild(lab);
+      var g = document.createElement('div'); g.setAttribute('role', 'radiogroup'); g.setAttribute('aria-labelledby', lab.id);
+      var cur = S.set[r[1]];
+      r[2].forEach(function (o) {
+        var b = document.createElement('button'); b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', String(o[0] === cur)); b.tabIndex = o[0] === cur ? 0 : -1; b.textContent = o[1];
+        if (o[2]) { var s = document.createElement('small'); s.textContent = o[2]; b.appendChild(s); }
+        b.onclick = function () { setOpt(r[1], o[0]); };
+        g.appendChild(b);
+      });
+      g.onkeydown = function (e) { var l = Array.prototype.slice.call(g.children), i = l.indexOf(document.activeElement); if (i < 0) return; var d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0; if (!d) return; e.preventDefault(); l[(i + d + l.length) % l.length].click(); };
+      row.appendChild(g); box.appendChild(row);
+    });
+    var note = document.createElement('p'); note.className = 'dim'; note.textContent = 'True checking also applies in the campaign: mistakes are counted when the grid is full and there is no thread to lose. Changes apply from the next patch.'; box.appendChild(note);
+  }
+  function setOpt(k, v) {
+    S.set[k] = v;
+    save(); if (k === 'motion') applyMotion();
+    if (k === 'sound' && !v && AC) AC.suspend();
+    var foc = document.activeElement && document.activeElement.closest ? document.activeElement.closest('[role=radiogroup]') : null, lab = foc && foc.getAttribute('aria-labelledby');
+    paintSettings(); if (lab) { var g = document.querySelector('[aria-labelledby="' + lab + '"] [aria-checked="true"]'); if (g) g.focus(); }
+    cabinDirty = true; wake();
+  }
+
+  /* ── Stats ──────────────────────────────────────────────────────────── */
+  function openStats() {
+    var b = $('statBox'); b.textContent = '';
+    var c = clearedCount(), fl = 0; for (var n = 1; n <= NM; n++) if (S.flaw[n]) fl++;
+    [['Rank', rankOf(c)], ['Patches on the quilt', c + ' / 20'], ['Not a pin pricked', fl + ' patches'], ['Pictures sewn', S.st.patches], ['Lines finished', S.st.lines | 0], ['Time at the frame', mmss(S.st.time)],
+     ['Pinpricks, all time', S.st.pricks], ['Daily streak', S.daily.streak + ' days'], ['Portrait patches', Object.keys(S.portraits).length + ' / 4'], ['Midnight patches', Object.keys(S.mid).length + ' / 20']]
+      .forEach(function (s) { var d = document.createElement('div'); d.className = 'stat'; d.innerHTML = '<b></b><span></span>'; d.firstChild.textContent = s[1]; d.lastChild.textContent = s[0]; b.appendChild(d); });
+    var bb = $('bestBox'); bb.textContent = '';
+    var any = false; for (n = 1; n <= NM; n++) if (S.best[n]) { any = true; var p = document.createElement('div'); p.textContent = n + ' · ' + MISSIONS[n].name + ' — ' + mmss(S.best[n]) + ' (par ' + mmss(MISSIONS[n].par) + ')' + (S.flaw[n] ? ' · not a pin pricked' : ''); bb.appendChild(p); }
+    if (!any) bb.textContent = 'Sew your first patch and your times appear here.';
+    setScene('stats', 'title');
+  }
+
+  /* ── The Quilt Card: a picture of your quilt, saved on this device ───── */
+  var cardUrl = '';
+  function openCard(act, from) {
+    var W = 1080, H = 1350, c = mk(W, H), x = c.getContext('2d');
+    x.fillStyle = '#3b2619'; x.fillRect(0, 0, W, H);
+    for (var i = 0; i < W; i += 90) { x.fillStyle = i % 180 ? 'rgba(255,255,255,.03)' : 'rgba(0,0,0,.08)'; x.fillRect(i, 0, 90, H); }
+    x.fillStyle = '#a8324a'; x.fillRect(110, 60, W - 220, 150); x.strokeStyle = 'rgba(255,243,223,.7)'; x.setLineDash([14, 10]); x.lineWidth = 4; x.strokeRect(124, 74, W - 248, 122); x.setLineDash([]);
+    x.fillStyle = '#fff3df'; x.textAlign = 'center'; x.font = '800 72px ' + FONT; x.fillText('QUILTMAKER', W / 2, 150); x.font = '600 24px ' + FONT; x.fillText('THE STORY QUILT OF PINECREST', W / 2, 186);
+    drawQuilt(x, 70, 250, W - 140, (W - 140) * 0.72, { sketch: true });
+    var done = clearedCount(), name = 'An apprentice';
+    x.fillStyle = '#f7f0e1'; x.font = '700 44px ' + FONT; x.fillText(name, W / 2, 1060);
+    x.font = '500 30px ' + FONT; x.fillText(ACTS[act].name + ' is sewn · ' + done + ' of 20 patches · ' + rankOf(done), W / 2, 1110);
+    x.fillStyle = 'rgba(247,240,225,.6)'; x.font = '500 24px ' + FONT; x.fillText(new Date().toDateString() + ' · TrueMarch', W / 2, 1160);
+    drawPortrait(x, act, W / 2 - 80, 1190, 140);
+    try { if (cardUrl) URL.revokeObjectURL(cardUrl); } catch (e) { /* none */ }
+    $('cardImg').src = c.toDataURL('image/png'); $('cardImg').alt = 'Your story quilt: ' + done + ' of 20 patches, ' + ACTS[act].name + ' complete';
+    $('cttl').textContent = 'Quilt Card · ' + ACTS[act].name;
+    $('cardSave').onclick = function () { c.toBlob(function (bl) { if (!bl) return; cardUrl = URL.createObjectURL(bl); var a = document.createElement('a'); a.href = cardUrl; a.download = 'quiltmaker-' + ACTS[act].name.toLowerCase() + '.png'; document.body.appendChild(a); a.click(); a.remove(); toast('Saved to this device.'); }); };
+    setScene('card', from);
+  }
+
+  /* ── Portrait patches: a cat's face, sampled to 24×24 in the season's fabric ── */
+  function makePortrait(act) {
+    var pal = ACTS[act].ppal;
+    var fromCanvas = function (c) { try { var d = c.getContext('2d').getImageData(0, 0, c.width, c.height); S.portraits[act] = Array.prototype.join.call(Q.portraitPatch(d, pal, 24), ''); save(); cabinDirty = true; return true; } catch (e) { return false; } };
+    var fallback = function () { var c = mk(96, 96), x = c.getContext('2d'); x.fillStyle = '#e08a4a'; x.beginPath(); x.arc(48, 52, 34, 0, 7); x.fill(); x.beginPath(); x.moveTo(18, 30); x.lineTo(26, 8); x.lineTo(40, 22); x.moveTo(78, 30); x.lineTo(70, 8); x.lineTo(56, 22); x.fill(); x.fillStyle = '#f4e9d4'; x.beginPath(); x.ellipse(48, 66, 18, 13, 0, 0, 7); x.fill(); x.fillStyle = '#2b2320'; x.fillRect(46, 18, 4, 14); x.fillRect(22, 44, 12, 3); x.fillRect(62, 44, 12, 3); x.beginPath(); x.arc(38, 48, 4, 0, 7); x.arc(58, 48, 4, 0, 7); x.arc(48, 60, 4, 0, 7); x.fill(); fromCanvas(c); };
+    fallback();
+  }
+
+  /* ── How to sew: one row per control, a live demo on the real board ─── */
+  var LESSON = [
+    { g: 'Move', id: 'move', k: ['←', '↑', '→', '↓'], t: 'Move the needle', tt: 'Tap a square', cap: 'The arrow keys move the needle one square at a time.', tcap: 'Tap any square to bring the needle there.' },
+    { g: 'Sew', id: 'stitch', k: ['Space'], t: 'Stitch a square', tt: 'Tap', cap: 'Space stitches the square under the needle.', tcap: 'A tap stitches the square.' },
+    { g: 'Sew', id: 'run', k: ['Space', '→'], t: 'Stitch a whole run', tt: 'Drag', cap: 'Hold Space and press an arrow: every square you pass is stitched.', tcap: 'Drag along a row and every square you pass is stitched.' },
+    { g: 'Sew', id: 'pin', k: ['X'], t: 'Pin an empty square', tt: 'Long-press / Pin', cap: 'X pins a square you have proved empty. Pins are free.', tcap: 'Long-press, or switch the Pin button on, to pin a square you proved empty.' },
+    { g: 'Sew', id: 'colour', k: ['1', '2'], t: 'Pick the thread colour', tt: 'Palette', cap: 'On colour patches 1–4 pick the thread. A clue’s colour is its run’s colour.', tcap: 'On colour patches the palette picks the thread.' },
+    { g: 'Sew', id: 'undo', k: ['Z'], t: 'Unpick', tt: '↶', cap: 'Z unpicks your last stroke — free, never a mistake.', tcap: 'The ↶ button unpicks your last stroke — free.' },
+    { g: 'Game keys', id: 'pause', k: ['P'], t: 'Put the needle down', tt: '❚❚', cap: 'P (or Esc) pauses. The clock waits.', tcap: 'The ❚❚ button pauses. The clock waits.' },
+    { g: 'Game keys', id: 'mute', k: ['M'], t: 'Sound on / off', tt: 'Settings', cap: 'M mutes and unmutes.', tcap: 'Settings → Sound.' },
+  ];
+  var DEMO = null, howFrom = 'title', lessonSel = 0;
+  function openHow(from) {
+    howFrom = from;
+    var box = $('lessonList'); box.textContent = ''; var lastG = '';
+    LESSON.forEach(function (r, i) {
+      if (r.g !== lastG) { lastG = r.g; var h = document.createElement('div'); h.className = 'grp'; h.textContent = r.g; h.setAttribute('role', 'presentation'); box.appendChild(h); }
+      var b = document.createElement('button'); b.setAttribute('role', 'option'); b.setAttribute('aria-selected', String(i === lessonSel)); b.dataset.i = i;
+      var a = document.createElement('span'); a.textContent = r.t; b.appendChild(a);
+      var k = document.createElement('span'); if (TOUCH) { k.className = 'dim'; k.textContent = r.tt; } else r.k.forEach(function (kk) { var e = document.createElement('kbd'); e.textContent = kk; k.appendChild(e); }); b.appendChild(k);
+      b.onclick = function () { b.focus(); };
+      box.appendChild(b);
+    });
+    rove(box, '[role=option]', { attr: 'aria-selected', onFocus: function (b) { lessonSel = +b.dataset.i; demoStart(LESSON[lessonSel]); } });
+    setScene('how', from);
+    var sel = box.querySelectorAll('[role=option]')[lessonSel]; if (sel) sel.focus({ preventScroll: true });
+    demoStart(LESSON[lessonSel]);
+  }
+  $('tryIt').onclick = function () { var id = LESSON[lessonSel].id; if (howFrom === 'pause' && G && G.mode !== 'train') { toast('Finish or put aside this patch first — the Scrap Table is in the main menu.'); return; } startTraining(id); };
+  function demoStart(row) {
+    var def = row.id === 'colour' ? BYID.t3 : BYID.m1a;
+    var B = makeBoard(def, { fabric: S.fabric }); B.mode = 'demo';
+    DEMO = { row: row, B: B, t: 0, step: 0, lit: '', cv: $('demoCv') };
+    $('demoCap').textContent = TOUCH ? row.tcap : row.cap;
+    demoReset();
+    wake();
+  }
+  function demoStop() { DEMO = null; }
+  function demoReset() { var B = DEMO.B; B.cells.fill(0); B.lineDone.fill(0); B.cx = 0; B.cy = 0; B.colour = 1; B.dirtyGrid = B.dirtyClue = true; DEMO.t = 0; DEMO.step = 0; DEMO.lit = ''; }
+  /* Scripts: [time, key lit, action]. The real board takes the action; the keycap lights with it. */
+  function demoScript(id) {
+    var B = DEMO.B, mv = function (dx, dy) { return function () { B.cx = clamp(B.cx + dx, 0, 4); B.cy = clamp(B.cy + dy, 0, 4); }; };
+    var put = function (v) { return function () { var i = B.cy * 5 + B.cx; B.cells[i] = v; B.dirtyGrid = true; for (var l = 0; l < B.NL; l++) { var ok = lineMatches(B, l); if (ok !== !!B.lineDone[l]) { B.lineDone[l] = ok ? 1 : 0; B.dirtyClue = true; if (ok) needleRun(l); } } }; };
+    var col = B.p.cells;
+    switch (id) {
+      case 'move': return [[0.5, '→', mv(1, 0)], [1, '→', mv(1, 0)], [1.5, '↓', mv(0, 1)], [2, '↓', mv(0, 1)], [2.5, '←', mv(-1, 0)], [3, '↑', mv(0, -1)]];
+      case 'stitch': return [[0.4, '→', mv(1, 0)], [0.9, 'Space', put(1)], [1.5, '↓', mv(0, 1)], [2, 'Space', put(1)]];
+      case 'run': return [[0.3, '↓', mv(0, 1)], [0.8, 'Space', put(1)], [1.1, 'Space+→', function () { mv(1, 0)(); put(1)(); }], [1.4, 'Space+→', function () { mv(1, 0)(); put(1)(); }], [1.7, 'Space+→', function () { mv(1, 0)(); put(1)(); }], [2, 'Space+→', function () { mv(1, 0)(); put(1)(); }]];
+      case 'pin': return [[0.6, 'X', put(PIN)], [1.2, '→', mv(2, 0)], [1.7, 'X', put(PIN)], [2.2, '→', mv(2, 0)], [2.7, 'X', put(PIN)]];
+      case 'colour': return [[0.4, 'Space', function () { B.colour = col[0] || 1; put(B.colour)(); }], [1, '↓', mv(0, 1)], [1.4, '→', mv(1, 0)], [1.8, '2', function () { B.colour = 2; }], [2.3, 'Space', put(2)]];
+      case 'undo': return [[0.4, 'Space', put(1)], [0.9, '→', mv(1, 0)], [1.3, 'Space', put(1)], [2, 'Z', function () { B.cells[1] = 0; B.dirtyGrid = true; }], [2.6, 'Z', function () { B.cells[0] = 0; B.dirtyGrid = true; }]];
+      default: return [[0.6, DEMO.row.k[0], function () { }]];
+    }
+  }
+  function stepDemo(dt) {
+    if (!DEMO || scene !== 'how') return false;
+    DEMO.t += dt;
+    var sc = DEMO.script || (DEMO.script = demoScript(DEMO.row.id));
+    while (DEMO.step < sc.length && DEMO.t >= sc[DEMO.step][0]) { DEMO.lit = sc[DEMO.step][1]; DEMO.litT = 0.35; sc[DEMO.step][2](); DEMO.step++; }
+    if (DEMO.litT > 0) { DEMO.litT -= dt; if (DEMO.litT <= 0) DEMO.lit = ''; }
+    if (DEMO.t > (sc.length ? sc[sc.length - 1][0] : 0) + 1.8) { demoReset(); DEMO.script = null; }
+    return true;
+  }
+  function renderDemo(t) {
+    var cv = DEMO.cv, w = cv.clientWidth, h = cv.clientHeight; if (!w || !h) return;
+    if (cv.width !== Math.round(w * DPR) || cv.height !== Math.round(h * DPR)) { cv.width = Math.round(w * DPR); cv.height = Math.round(h * DPR); }
+    var c = cv.getContext('2d'); c.setTransform(DPR, 0, 0, DPR, 0, 0);
+    c.fillStyle = '#e8dcc0'; c.fillRect(0, 0, w, h);
+    if (!DEMO.geo || DEMO.geo.w !== w || DEMO.geo.h !== h) { DEMO.geo = boardGeo(DEMO.B, { x: 10, y: 10, w: w - 20, h: h - 70 }, 10); DEMO.geo.w = w; DEMO.geo.h = h; }
+    drawBoard(c, DEMO.B, DEMO.geo, t, { cursor: true });
+    drawRuns(c, DEMO.B, DEMO.geo); drawFx(c);
+    /* the keycaps (or the touch control), lit in time with the action */
+    var keys = TOUCH ? [DEMO.row.tt] : DEMO.row.k, x = w / 2 - keys.length * 36, y = h - 50;
+    c.font = '700 15px ui-monospace, monospace'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    keys.forEach(function (k, i) {
+      var kw = Math.max(52, c.measureText(k).width + 22), kx = x + i * 72 + 36 - kw / 2;
+      var lit = DEMO.lit && (DEMO.lit === k || DEMO.lit.split('+').indexOf(k) >= 0 || TOUCH);
+      c.fillStyle = lit ? '#d9a441' : '#fffaf0'; c.strokeStyle = lit ? '#8a6416' : 'rgba(43,35,32,.4)'; c.lineWidth = 2;
+      c.beginPath(); roundRect(c, kx, y + (lit ? 3 : 0), kw, 36, 7); c.fill(); c.stroke();
+      c.fillStyle = '#2b2320'; c.fillText(k, kx + kw / 2, y + 18 + (lit ? 3 : 0));
+    });
+  }
+
+  /* ══ The cabin (title and menus) and the sewing table (play) ═══════════════════════════════════════ */
+  var cv = $('world'), ctx = cv.getContext('2d'), DPR = 1, VW = 0, VH = 0;
+  var CAB = {}, cabin = null, cabinDirty = true, table = null, tableDirty = true, flare = 0, bob = { awake: 0, bat: 0 }, ptr = { x: -999, y: -999 };
+  var SNOW = new Float32Array(60 * 3); for (var si = 0; si < 60; si++) { SNOW[si * 3] = Math.random(); SNOW[si * 3 + 1] = Math.random(); SNOW[si * 3 + 2] = 0.3 + Math.random() * 0.7; }
+  function layoutCabin() {
+    var wide = VW >= 760, L = wide ? VW - 340 : VW;
+    if (wide) {
+      CAB.win = { x: L * 0.06, y: VH * 0.1, w: L * 0.19, h: VH * 0.22 };
+      CAB.hearth = { x: L * 0.03, y: VH * 0.36, w: L * 0.25, h: VH * 0.3 };
+      CAB.quilt = { x: L * 0.31, y: VH * 0.19, w: L * 0.67, h: VH * 0.72 };
+      CAB.basket = { x: CAB.hearth.x + CAB.hearth.w * 0.88, y: CAB.hearth.y + CAB.hearth.h + 8, r: Math.min(56, L * 0.06) };
+      document.documentElement.style.setProperty('--ban-x', Math.round(L * 0.62) + 'px');
+    } else {
+      CAB.win = null; CAB.hearth = null;
+      CAB.quilt = { x: 10, y: 104, w: VW - 20, h: Math.max(120, VH * 0.45 - 104) };
+      CAB.basket = { x: VW - 56, y: CAB.quilt.y + CAB.quilt.h + 30, r: 40 };
+      document.documentElement.style.setProperty('--ban-x', '50%');
+    }
+    cabinDirty = true;
+  }
+  function paintCabin() {
+    if (!cabin || cabin.width !== Math.round(VW * DPR) || cabin.height !== Math.round(VH * DPR)) cabin = mk(VW * DPR, VH * DPR);
+    var c = cabin.getContext('2d'); c.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var g = c.createLinearGradient(0, 0, 0, VH); g.addColorStop(0, '#2a1a12'); g.addColorStop(1, '#3d2618'); c.fillStyle = g; c.fillRect(0, 0, VW, VH);
+    for (var y = 0; y < VH; y += 38) { c.fillStyle = (y / 38) % 2 ? 'rgba(0,0,0,.12)' : 'rgba(255,220,180,.03)'; c.fillRect(0, y, VW, 36); c.fillStyle = 'rgba(0,0,0,.35)'; c.fillRect(0, y + 36, VW, 2); }
+    c.fillStyle = '#24160f'; c.fillRect(0, VH * 0.94, VW, VH * 0.06);
+    if (CAB.win) {
+      var w = CAB.win; c.fillStyle = '#5a3b26'; c.fillRect(w.x - 12, w.y - 12, w.w + 24, w.h + 24);
+      var sg = c.createLinearGradient(0, w.y, 0, w.y + w.h); sg.addColorStop(0, '#1d2547'); sg.addColorStop(1, '#5a5f8a'); c.fillStyle = sg; c.fillRect(w.x, w.y, w.w, w.h);
+      c.fillStyle = '#e9eef2'; c.beginPath(); c.moveTo(w.x, w.y + w.h); c.quadraticCurveTo(w.x + w.w * 0.4, w.y + w.h * 0.72, w.x + w.w, w.y + w.h * 0.82); c.lineTo(w.x + w.w, w.y + w.h); c.fill();
+      c.fillStyle = '#2c3a2e'; for (var t = 0; t < 4; t++) { var tx = w.x + w.w * (0.15 + t * 0.24), ty = w.y + w.h * 0.86; c.beginPath(); c.moveTo(tx, ty - w.h * 0.3); c.lineTo(tx - w.w * 0.07, ty); c.lineTo(tx + w.w * 0.07, ty); c.fill(); }
+      c.fillStyle = '#ffe9a8'; c.beginPath(); c.arc(w.x + w.w * 0.78, w.y + w.h * 0.22, Math.min(w.w, w.h) * 0.08, 0, 7); c.fill();
+      c.fillStyle = '#5a3b26'; c.fillRect(w.x + w.w / 2 - 3, w.y, 6, w.h); c.fillRect(w.x, w.y + w.h / 2 - 3, w.w, 6);
+      c.fillStyle = c.createPattern(fabricTile('#a8324a', 'gingham', 10), 'repeat'); c.fillRect(w.x - 20, w.y - 18, w.w * 0.22, w.h + 30); c.fillRect(w.x + w.w * 0.8 + 20, w.y - 18, w.w * 0.22, w.h + 30);
+    }
+    if (CAB.hearth) {
+      var h = CAB.hearth; c.fillStyle = '#6b6560'; c.fillRect(h.x, h.y, h.w, h.h);
+      c.fillStyle = 'rgba(0,0,0,.18)'; for (var r = 0; r < 8; r++) for (var q = 0; q < 5; q++) c.fillRect(h.x + q * h.w / 5 + (r % 2) * h.w / 10, h.y + r * h.h / 8, h.w / 5 - 3, h.h / 8 - 3);
+      c.fillStyle = '#120a07'; c.beginPath(); c.moveTo(h.x + h.w * 0.18, h.y + h.h); c.lineTo(h.x + h.w * 0.18, h.y + h.h * 0.45); c.quadraticCurveTo(h.x + h.w * 0.5, h.y + h.h * 0.18, h.x + h.w * 0.82, h.y + h.h * 0.45); c.lineTo(h.x + h.w * 0.82, h.y + h.h); c.fill();
+      c.fillStyle = '#4a3022'; c.fillRect(h.x - 10, h.y - 14, h.w + 20, 16);
+      c.fillStyle = '#5b3a24'; c.fillRect(h.x + h.w * 0.3, h.y + h.h * 0.86, h.w * 0.4, h.h * 0.06);
+    }
+    var qf = CAB.quilt;
+    c.fillStyle = '#6b4a2b'; c.fillRect(qf.x, qf.y - 6, qf.w, 14); c.fillRect(qf.x + 8, qf.y, 12, qf.h + 10); c.fillRect(qf.x + qf.w - 20, qf.y, 12, qf.h + 10);
+    CAB.Q = drawQuilt(c, qf.x + 26, qf.y + 14, qf.w - 52, qf.h - 18, {});
+    var b = CAB.basket; c.fillStyle = '#8a5a2b'; c.beginPath(); c.ellipse(b.x, b.y, b.r, b.r * 0.42, 0, 0, Math.PI); c.fill(); c.fillStyle = '#6b4320'; c.beginPath(); c.ellipse(b.x, b.y, b.r, b.r * 0.22, 0, 0, 7); c.fill();
+    c.strokeStyle = 'rgba(0,0,0,.25)'; c.lineWidth = 2; for (var k = -3; k <= 3; k++) { c.beginPath(); c.moveTo(b.x + k * b.r * 0.28, b.y); c.lineTo(b.x + k * b.r * 0.24, b.y + b.r * 0.38); c.stroke(); }
+    var glow = c.createRadialGradient(0, 0, 0, 0, 0, 1); glow.addColorStop(0, 'rgba(255,170,80,.35)'); glow.addColorStop(1, 'rgba(255,170,80,0)'); CAB.glow = glow;
+    cabinDirty = false;
+  }
+  var FLAME = ['#ffd27a', '#ff9a3c', '#e2582a'];
+  function drawCabin(t, live) {
+    if (cabinDirty) paintCabin();
+    ctx.drawImage(cabin, 0, 0, VW, VH);
+    if (CAB.win && live) {
+      var w = CAB.win; ctx.save(); ctx.beginPath(); ctx.rect(w.x, w.y, w.w, w.h); ctx.clip(); ctx.fillStyle = '#ffffff';
+      for (var i = 0; i < 60; i++) { var sx = w.x + ((SNOW[i * 3] + Math.sin(t * 0.6 + i) * 0.02) % 1) * w.w, sy = w.y + ((SNOW[i * 3 + 1] + t * 0.06 * SNOW[i * 3 + 2]) % 1) * w.h; ctx.fillRect(sx, sy, 1.5 + SNOW[i * 3 + 2], 1.5 + SNOW[i * 3 + 2]); }
+      ctx.restore();
+    }
+    if (CAB.hearth) {
+      var h = CAB.hearth, fx = h.x + h.w / 2, fy = h.y + h.h * 0.88, fw = h.w * 0.26 * (1 + flare * 0.5), fl = h.h * 0.32 * (1 + flare * 0.8);
+      ctx.save(); ctx.globalAlpha = 0.55 + 0.2 * (live ? Math.sin(t * 7) * 0.5 + 0.5 : 0.5) + flare * 0.3; ctx.translate(fx, fy); ctx.scale(h.w * 1.6, h.w * 1.6); ctx.fillStyle = CAB.glow; ctx.fillRect(-1, -1, 2, 2); ctx.restore();
+      for (var f = 0; f < 3; f++) {
+        var k = 1 - f * 0.28, wob = live ? Math.sin(t * (8 + f * 3) + f) * fw * 0.12 : 0;
+        ctx.fillStyle = FLAME[2 - f]; ctx.beginPath(); ctx.moveTo(fx - fw * k, fy); ctx.quadraticCurveTo(fx - fw * k * 0.8, fy - fl * k * 0.6, fx + wob, fy - fl * k * (live ? 1 + Math.sin(t * 11 + f) * 0.08 : 1)); ctx.quadraticCurveTo(fx + fw * k * 0.8, fy - fl * k * 0.6, fx + fw * k, fy); ctx.fill();
+      }
+    }
+    drawBobbin(t, live);
+    if (CAB.Q && CAB.Q.fest) {   /* the Winter Festival is sewn: the whole quilt lights up */
+      var Qr = CAB.Q; for (var j = 0; j <= 24; j++) { var lx = Qr.x + Qr.w * j / 24, ly = Qr.y - Qr.s * 0.08 + Math.sin(j * 0.9) * 3, on = live ? 0.5 + 0.5 * Math.sin(t * 3 + j * 1.7) : 0.8; ctx.fillStyle = j % 3 === 0 ? '#e8c25a' : j % 3 === 1 ? '#b8323a' : '#7f9c6b'; ctx.globalAlpha = 0.4 + 0.6 * on; ctx.beginPath(); ctx.arc(lx, ly, 3.5, 0, 7); ctx.fill(); } ctx.globalAlpha = 1;
+    }
+  }
+  /* Bobbin: asleep in the basket; wakes when the pointer comes near, and bats at a thread. */
+  function drawBobbin(t, live) {
+    var b = CAB.basket, s = b.r, x = b.x, y = b.y - s * 0.1, br = live ? Math.sin(t * 1.7) * 0.04 : 0, aw = bob.awake;
+    ctx.fillStyle = '#d98a3c'; ctx.beginPath(); ctx.ellipse(x, y, s * 0.62, s * 0.3 * (1 + br), 0, Math.PI, 0); ctx.fill();
+    ctx.strokeStyle = '#b06a2a'; ctx.lineWidth = s * 0.05; for (var i = -2; i <= 2; i++) { ctx.beginPath(); ctx.moveTo(x + i * s * 0.18, y - s * 0.28 * (1 + br)); ctx.lineTo(x + i * s * 0.16, y - s * 0.08); ctx.stroke(); }
+    var hx = x - s * 0.45, hy = y - s * 0.12 - aw * s * 0.32;
+    ctx.fillStyle = '#d98a3c'; ctx.beginPath(); ctx.arc(hx, hy, s * 0.22, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(hx - s * 0.2, hy - s * 0.08); ctx.lineTo(hx - s * 0.16, hy - s * 0.32); ctx.lineTo(hx - s * 0.03, hy - s * 0.18); ctx.moveTo(hx + s * 0.2, hy - s * 0.08); ctx.lineTo(hx + s * 0.16, hy - s * 0.32); ctx.lineTo(hx + s * 0.03, hy - s * 0.18); ctx.fill();
+    ctx.strokeStyle = '#3a2418'; ctx.lineWidth = Math.max(1.2, s * 0.03);
+    if (aw > 0.5) { ctx.fillStyle = '#3a2418'; ctx.beginPath(); ctx.arc(hx - s * 0.08, hy - s * 0.02, s * 0.035, 0, 7); ctx.arc(hx + s * 0.08, hy - s * 0.02, s * 0.035, 0, 7); ctx.fill(); }
+    else { ctx.beginPath(); ctx.arc(hx - s * 0.08, hy - s * 0.03, s * 0.04, 0.2, Math.PI - 0.2); ctx.moveTo(hx + s * 0.12, hy - s * 0.03); ctx.arc(hx + s * 0.08, hy - s * 0.03, s * 0.04, 0.2, Math.PI - 0.2); ctx.stroke(); }
+    ctx.fillStyle = '#d98a3c'; ctx.beginPath(); ctx.ellipse(x + s * 0.62, y - s * 0.05, s * 0.28, s * 0.07, -0.3, 0, 7); ctx.fill();
+    /* a thread with a ball of yarn, swinging when batted */
+    var sw = live ? Math.sin(t * 5) * bob.bat * 0.6 : 0, ax = x - s * 0.9, ay = y - s * 1.6, bx = ax + Math.sin(sw) * s * 0.9, by = ay + Math.cos(sw) * s * 0.9;
+    ctx.strokeStyle = '#a8324a'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+    ctx.fillStyle = '#a8324a'; ctx.beginPath(); ctx.arc(bx, by, s * 0.12, 0, 7); ctx.fill();
+    if (aw > 0.5) { var px = hx - s * 0.2 + Math.sin(t * 6) * s * 0.12 * bob.bat, py = hy + s * 0.12 - Math.abs(Math.sin(t * 6)) * s * 0.3 * bob.bat; ctx.fillStyle = '#e8a35a'; ctx.beginPath(); ctx.ellipse(px, py, s * 0.08, s * 0.06, 0, 0, 7); ctx.fill(); }
+    if (aw < 0.5 && live) { ctx.fillStyle = 'rgba(247,240,225,.7)'; ctx.font = '700 ' + Math.round(s * 0.22) + 'px ' + FONT; ctx.fillText('z', hx + s * 0.25, hy - s * 0.3 - (t % 2) * s * 0.15); }
+  }
+  function paintTable() {
+    if (!table || table.width !== Math.round(VW * DPR) || table.height !== Math.round(VH * DPR)) table = mk(VW * DPR, VH * DPR);
+    var c = table.getContext('2d'), mid = RUN && RUN.mid; c.setTransform(DPR, 0, 0, DPR, 0, 0);
+    c.fillStyle = mid ? '#141a33' : '#5a3a24'; c.fillRect(0, 0, VW, VH);
+    for (var x = 0; x < VW; x += 64) { c.fillStyle = (x / 64) % 2 ? 'rgba(0,0,0,.08)' : 'rgba(255,255,255,.025)'; c.fillRect(x, 0, 62, VH); }
+    c.fillStyle = mid ? '#2a335c' : '#e4d6b8'; var a = PL.area || { x: 0, y: 0, w: VW, h: VH }; c.fillRect(a.x - 4, a.y - 4, a.w + 8, a.h + 8);
+    c.strokeStyle = mid ? 'rgba(207,216,255,.4)' : 'rgba(168,50,74,.45)'; c.setLineDash([8, 6]); c.lineWidth = 2; c.strokeRect(a.x + 4, a.y + 4, a.w - 8, a.h - 8); c.setLineDash([]);
+    if (mid) { c.fillStyle = 'rgba(232,194,90,.9)'; c.beginPath(); c.arc(a.x + a.w - 30, a.y + 26, 12, 0, 7); c.fill(); c.fillStyle = '#2a335c'; c.beginPath(); c.arc(a.x + a.w - 25, a.y + 22, 11, 0, 7); c.fill(); }
+    tableDirty = false;
+  }
+
+  /* ── Play layout: the apron on the side (wide), on a narrow side (phone landscape) or below (phone portrait) ── */
+  var PL = { mode: 'side', area: null };
+  function layoutPlay() {
+    var ap = $('apron'), hud = 46;
+    PL.mode = VW >= 900 ? 'side' : VW > VH ? 'side-narrow' : 'bottom';
+    ap.className = 'apron' + (PL.mode === 'bottom' ? ' bottom' : PL.mode === 'side-narrow' ? ' side-narrow' : '');
+    var aw = PL.mode === 'bottom' ? 0 : ap.offsetWidth || (PL.mode === 'side' ? 236 : 200), ah = PL.mode === 'bottom' ? ap.offsetHeight || 130 : 0;
+    PL.area = { x: 6, y: hud + 6, w: VW - aw - 12, h: VH - hud - ah - 12 };
+    if (G) G.geo = null;
+    tableDirty = true; wake();
+  }
+  function ensureGeo() {
+    if (!G) return null;
+    if (!G.geo) { var minCs = TOUCH ? 22 : 18; G.geo = boardGeo(G, { x: PL.area.x + 4, y: PL.area.y + 4, w: PL.area.w - 8, h: PL.area.h - 8 }, minCs); follow(G, G.geo); }
+    return G.geo;
+  }
+
+  /* ══ Input ═════════════════════════════════════════════════════════════════════════════════════════ */
+  function cellAt(px, py) {
+    var g = G && G.geo; if (!g) return null;
+    var cx = Math.floor((px - g.gx) / g.cs), cy = Math.floor((py - g.gy) / g.cs);
+    if (g.mini && px >= g.mini.x - 3 && px <= g.mini.x + g.mini.w + 3 && py >= g.mini.y - 3 && py <= g.mini.y + g.mini.h + 3) return { mini: true, x: clamp(Math.floor((px - g.mini.x) / g.mini.s), 0, G.p.w - 1), y: clamp(Math.floor((py - g.mini.y) / g.mini.s), 0, G.p.h - 1) };
+    if (cx >= 0 && cx < g.vc && cy >= 0 && cy < g.vr) return { i: (cy + g.camY) * G.p.w + cx + g.camX };
+    if (px < g.gx && px >= g.gx - g.rw && cy >= 0 && cy < g.vr) return { line: cy + g.camY };
+    if (py < g.gy && py >= g.gy - g.ch && cx >= 0 && cx < g.vc) return { line: G.p.h + cx + g.camX };
+    return null;
+  }
+  var strokeId = null;
+  cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  cv.addEventListener('pointerdown', function (e) {
+    audio();
+    if (e.pointerType === 'touch') setTouch(true); else if (e.pointerType === 'mouse' && TOUCH && !matchMedia('(pointer: coarse)').matches) setTouch(false);
+    if (scene === 'title') { var b = CAB.basket; if (b && Math.hypot(e.clientX - b.x, e.clientY - b.y) < b.r * 1.6) { bob.awake = 1; bob.bat = 1; bob.t = 3; tone(1400, 0.08, 'sine', 0.06); tone(1800, 0.1, 'sine', 0.05, 0.08); } return; }
+    if (scene !== 'play' || !G || G.done || G.hanging) return;
+    e.preventDefault();
+    var h = cellAt(e.clientX, e.clientY); if (!h) return;
+    if (h.mini) { G.geo.camX = clamp(h.x - Math.floor(G.geo.vc / 2), 0, G.p.w - G.geo.vc); G.geo.camY = clamp(h.y - Math.floor(G.geo.vr / 2), 0, G.p.h - G.geo.vr); wake(); return; }
+    if (h.i == null) return;
+    try { cv.setPointerCapture(e.pointerId); } catch (er) { /* fine */ }
+    strokeId = e.pointerId;
+    tick('move'); hintDone('move');
+    if (e.pointerType === 'touch' && G.tool !== 'pin') { pend = { i: h.i, t: 0, id: e.pointerId }; G.cx = h.i % G.p.w; G.cy = Math.floor(h.i / G.p.w); wake(); return; }
+    beginStroke(e.button === 2 || G.tool === 'pin' ? 'pin' : 'stitch', h.i);
+  });
+  cv.addEventListener('pointermove', function (e) {
+    ptr.x = e.clientX; ptr.y = e.clientY;
+    if (scene !== 'play' || !G) return;
+    var h = cellAt(e.clientX, e.clientY);
+    if (e.pointerType === 'mouse') { var hv = h && h.i != null ? h.i : -1; if (hv !== G.hover) { G.hover = hv; wake(); } }
+    if (e.pointerId !== strokeId) return;
+    if (pend && h && h.i != null && h.i !== pend.i) { var p = pend; pend = null; beginStroke('stitch', p.i); }
+    if (ST && h && h.i != null) { extendStroke(h.i); PL.edge = edgeOf(e.clientX, e.clientY); }
+  });
+  function edgeOf(x, y) { var g = G.geo; if (!g || !g.cam) return null; var ex = x < g.gx + g.cs * 0.6 ? -1 : x > g.gx + g.vc * g.cs - g.cs * 0.6 ? 1 : 0, ey = y < g.gy + g.cs * 0.6 ? -1 : y > g.gy + g.vr * g.cs - g.cs * 0.6 ? 1 : 0; return ex || ey ? { x: ex, y: ey, t: 0 } : null; }
+  function pointerEnd(e) {
+    if (e.pointerId !== strokeId) return;
+    strokeId = null; PL.edge = null;
+    if (pend) { var p = pend; pend = null; if (G && !G.done) { beginStroke('stitch', p.i); endStroke(); } return; }
+    endStroke();
+  }
+  cv.addEventListener('pointerup', pointerEnd); cv.addEventListener('pointercancel', pointerEnd);
+
+  var MOVE = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
+  addEventListener('keydown', function (e) {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key !== 'Tab') audio();
+    if (e.key === 'Escape') { e.preventDefault(); goBack(); return; }
+    if (e.code === 'KeyP') { if (scene === 'play') { pause(); return; } if (scene === 'pause') { resume(); return; } }
+    if (e.code === 'KeyM') { S.set.sound = !S.set.sound; save(); if (!S.set.sound && AC) AC.suspend(); say(S.set.sound ? 'Sound on' : 'Sound off'); toast(S.set.sound ? 'Sound on' : 'Sound off', 1200); return; }
+    if (scene === 'title' && e.code === 'Enter' && document.activeElement === document.body) { cont(); return; }
+    if (scene !== 'play' || !G) return;
+    if (TOUCH) setTouch(false);
+    lightKey(e.code, true);
+    if (G.done || G.hanging) { if (e.code === 'Space') e.preventDefault(); return; }
+    var mv = MOVE[e.key];
+    if (mv) {
+      e.preventDefault();
+      G.cx = clamp(G.cx + mv[0], 0, G.p.w - 1); G.cy = clamp(G.cy + mv[1], 0, G.p.h - 1); follow(G, G.geo); wake();
+      tick('move'); hintDone('move');
+      if (keyStroke && ST) { extendStroke(G.cy * G.p.w + G.cx); }
+      return;
+    }
+    if (e.code === 'Space' || e.code === 'Enter') {
+      e.preventDefault(); if (e.repeat) return;
+      if (e.code === 'Enter') return;
+      keyStroke = 'Space'; beginStroke('stitch', G.cy * G.p.w + G.cx); return;
+    }
+    if (e.code === 'KeyX') { e.preventDefault(); if (e.repeat) return; keyStroke = 'KeyX'; beginStroke('pin', G.cy * G.p.w + G.cx); return; }
+    if (/^Digit[1-4]$/.test(e.code)) { setColour(+e.code.slice(5)); return; }
+    if (e.code === 'KeyZ') { if (!e.repeat) undo(); return; }
+  });
+  addEventListener('keyup', function (e) {
+    lightKey(e.code, false);
+    if (keyStroke && e.code === keyStroke) { keyStroke = null; endStroke(); }
+    if (scene === 'play' && (e.code === 'Space' || e.code === 'Enter')) e.preventDefault();
+  });
+  addEventListener('blur', function () { keyStroke = null; endStroke(); });
+  document.addEventListener('visibilitychange', function () { if (document.hidden && scene === 'play' && G && !G.done) { endStroke(); pause(); } });
+
+  /* ══ The loop, with the 1,024-frame perf ring ═════════════════════════════════════════════ */
+  var PERF = { n: 0, i: 0, ft: new Float32Array(1024), fw: new Float32Array(1024) };
+  var awake = 2, last = performance.now(), T = 0, ready = false;
+  function wake() { awake = 2; }
+  function fit() {
+    DPR = Math.min(2, window.devicePixelRatio || 1); VW = innerWidth; VH = innerHeight;
+    cv.width = Math.round(VW * DPR); cv.height = Math.round(VH * DPR);
+    layoutCabin(); if (scene === 'play' || scene === 'pause') layoutPlay(); else { tableDirty = true; }
+    if (G) { G.L = null; G.geo = null; }
+    wake();
+  }
+  addEventListener('resize', fit);
+  function step(dt) {
+    var anim = false;
+    if (toastT > 0) { toastT -= dt; if (toastT <= 0) $('toast').classList.remove('on'); }
+    if (stampT > 0) { stampT -= dt; if (stampT <= 0) $('stamp').classList.remove('on'); }
+    if (amosT > 0) { amosT -= dt; if (amosT <= 0) hideAmos(); }
+    if (flare > 0) { flare = Math.max(0, flare - dt * 0.5); anim = true; }
+    if (bob.t > 0) { bob.t -= dt; if (bob.t <= 0) { bob.awake = 0; bob.bat = 0; } }
+    if (scene === 'title' && CAB.basket) { var near = Math.hypot(ptr.x - CAB.basket.x, ptr.y - CAB.basket.y) < CAB.basket.r * 2.2; if (near && !bob.awake) { bob.awake = 1; bob.bat = 1; bob.t = 2.5; } else if (near) bob.t = Math.max(bob.t, 0.6); }
+    if (scene === 'title' && !RM && S.set.sound && AC && Math.random() < dt * 3) SFX.crackle();
+    if (G && scene === 'play' && !document.hidden) {
+      if (!G.done && !G.hanging) {
+        G.time += dt; paintTime();
+        if (pend) { pend.t += dt; if (pend.t > 0.45) { var p = pend; pend = null; beginStroke('pin', p.i); if (navigator.vibrate) try { navigator.vibrate(15); } catch (er) { /* none */ } } }
+        if (PL.edge && ST && G.geo && G.geo.cam) { PL.edge.t += dt; if (PL.edge.t > 0.14) { PL.edge.t = 0; G.geo.camX = clamp(G.geo.camX + PL.edge.x, 0, G.p.w - G.geo.vc); G.geo.camY = clamp(G.geo.camY + PL.edge.y, 0, G.p.h - G.geo.vr); var h = cellAt(ptr.x, ptr.y); if (h && h.i != null) extendStroke(h.i); wake(); } }
+      }
+      if (G.shake > 0) { G.shake = Math.max(0, G.shake - dt); anim = true; }
+      if (WIN) { WIN.t += dt; anim = true; if (WIN.t >= WIN.dur) winDone(); }
+    }
+    stepFx(dt); if (pLive) anim = true;
+    if (stepRuns(dt)) anim = true;
+    if (stepDemo(dt)) anim = true;
+    return anim;
+  }
+  function render(t) {
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    var live = !RM;
+    if ((scene === 'play' || scene === 'pause' || scene === 'lost') && G) {
+      if (tableDirty) paintTable();
+      ctx.drawImage(table, 0, 0, VW, VH);
+      var geo = ensureGeo();
+      var wt = WIN ? WIN.t / WIN.dur : 0;
+      if (WIN && !RM && wt > 0.45) {   /* the patch flies to its place on the quilt with a running stitch */
+        var k = clamp((wt - 0.45) / 0.5, 0, 1), e2 = k * k * (3 - 2 * k), L = G.L, sw = geo.vc * geo.cs, sh = geo.vr * geo.cs;
+        var mq = G.mq, qx = PL.area.x + PL.area.w - 250, qy = PL.area.y + 8, tx = mq ? qx + mq.slot.x : VW - 90, ty = mq ? qy + mq.slot.y : 60, ts = mq ? mq.slot.s : 60;
+        if (mq) { ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.fillRect(qx + 4, qy + 6, 240, 168); ctx.drawImage(mq.c, qx, qy, 240, 168); }
+        ctx.globalAlpha = 1 - k * 0.15;
+        ctx.drawImage(L.grid, geo.camX * geo.cs * DPR, geo.camY * geo.cs * DPR, sw * DPR, sh * DPR, geo.gx + (tx - geo.gx) * e2, geo.gy + (ty - geo.gy) * e2, sw + (ts - sw) * e2, sh + (ts - sh) * e2);
+        ctx.globalAlpha = 1; ctx.strokeStyle = '#fff6e0'; ctx.lineWidth = 2; ctx.setLineDash(L.dashA); ctx.beginPath(); ctx.moveTo(geo.gx + sw / 2, geo.gy + sh / 2); ctx.quadraticCurveTo(VW / 2, ty, tx + ts / 2 + (geo.gx + sw / 2 - tx - ts / 2) * (1 - e2), ty + ts / 2 + (geo.gy + sh / 2 - ty - ts / 2) * (1 - e2)); ctx.stroke(); ctx.setLineDash(L.dash0);
+        ctx.strokeStyle = '#e8c25a'; ctx.lineWidth = 2; ctx.strokeRect(tx - 2, ty - 2, ts + 4, ts + 4);
+      } else {
+        drawBoard(ctx, G, geo, t, { cursor: scene === 'play', hover: !TOUCH, shake: G.shake > 0 && !RM ? Math.sin(G.shake * 60) * 5 * G.shake / 0.3 : 0 });
+        if (WIN && wt <= 0.45) { var sweep = wt / 0.45, gw = geo.vc * geo.cs, gh = geo.vr * geo.cs; ctx.save(); ctx.beginPath(); ctx.rect(geo.gx, geo.gy, gw, gh); ctx.clip(); ctx.fillStyle = 'rgba(255,248,225,.35)'; ctx.translate(geo.gx + (gw + gh) * sweep - gh, geo.gy); ctx.rotate(0.5); ctx.fillRect(-20, -gh, 40, gh * 3); ctx.restore(); }
+        drawRuns(ctx, G, geo);
+      }
+      drawFx(ctx);
+    } else {
+      var lv = live && (scene === 'title' || scene === 'tally');
+      drawCabin(t, lv);
+      if (scene !== 'title') { ctx.fillStyle = 'rgba(20,12,8,.55)'; ctx.fillRect(0, 0, VW, VH); }
+      drawFx(ctx);
+      if (lv) awake = Math.max(awake, 1);
+    }
+    if (DEMO && scene === 'how') renderDemo(t);
+  }
+  function frame(now) {
+    var dt = Math.min(0.05, (now - last) / 1000), t0 = performance.now();
+    PERF.ft[PERF.i] = now - last; last = now; T += dt;
+    var anim = step(dt);
+    if (anim) awake = Math.max(awake, 1);
+    if (awake > 0) { render(T); awake--; }
+    PERF.fw[PERF.i] = performance.now() - t0; PERF.i = (PERF.i + 1) & 1023; PERF.n++;
+    requestAnimationFrame(frame);
+  }
+  function pct(arr, n, q) { var a = Array.prototype.slice.call(arr, 0, n).sort(function (x, y) { return x - y; }); return a.length ? +a[Math.min(a.length - 1, Math.floor(q * a.length))].toFixed(2) : 0; }
+  function series(arr) { var n = Math.min(PERF.n, 1024); return { frames: n, p50: pct(arr, n, 0.5), p95: pct(arr, n, 0.95), p99: pct(arr, n, 0.99), worst: pct(arr, n, 1), over16: Array.prototype.filter.call(arr.subarray(0, n), function (x) { return x > 16; }).length }; }
+
+  /* ══ Page hooks: the game's state, frame timings and a puzzle self-test ══════════════════════════════════════════════════════════════ */
+  function selfTest() {
+    var t0 = performance.now(), bad = [];
+    PUZ.forEach(function (d) { var p = Q.parse(d), s = Q.solve(p, { faded: p.faded }); if (!s.ok) bad.push(d.id); if (p.givens.length > Math.floor(p.w * p.h * 0.04)) bad.push(d.id + ':givens'); });
+    var F = Q.full(2), ok1 = String(Array.from(Q.solveLine({ n: [1, 1], c: [1, 2] }, Uint8Array.from([F, F]), 2))) === '2,4', ok2 = Q.solveLine({ n: [1, 1], c: [1, 1] }, Uint8Array.from([F, F]), 2) === null;
+    if (!ok1) bad.push('colour-touch'); if (!ok2) bad.push('colour-gap');
+    return { ok: !bad.length, puzzles: PUZ.length, failures: bad, ms: Math.round(performance.now() - t0) };
+  }
+  var H = {
+    state: function () {
+      return { screen: scene, mode: G ? G.mode : null, mission: G ? G.n : null, patch: G ? G.def.id : null, pi: G ? G.pi : null, size: G ? G.p.w + 'x' + G.p.h : null, colours: G ? G.p.k : null,
+        thread: G ? G.thread : null, lives: G ? G.thread : null, pricks: G ? (RUN ? RUN.pricks : G.pricks) : null, filled: G ? correctCount(G) : null, target: G ? G.p.filled : null,
+        time: G ? Math.round(G.time * 10) / 10 : null, done: G ? !!G.done : null, hanging: G ? !!G.hanging : null, cursor: G ? [G.cx, G.cy] : null, colour: G ? G.colour : null,
+        cam: G && G.geo ? { cam: G.geo.cam, cs: G.geo.cs, vc: G.geo.vc, vr: G.geo.vr } : null,
+        trueMode: G ? G.trueMode : null, cleared: clearedCount(), fabric: S.fabric, run: !!S.run,
+        portraits: Object.keys(S.portraits), training: TRAIN ? Object.keys(TRAIN.done) : null, motion: RM ? 'reduced' : 'full', touch: TOUCH };
+    },
+    scene: function () { return scene; },
+    perf: function () { return { frame: series(PERF.ft), work: series(PERF.fw) }; },
+    perfReset: function () { PERF.n = 0; PERF.i = 0; },
+    training: function () { return TRAIN ? { done: Object.keys(TRAIN.done), complete: TRAIN.complete } : null; },
+    selfTest: selfTest,
+  };
+  window['__' + GAME_ID] = H;
+
+  /* ══ Boot ═════════════════════════════════════════════════════════════════════════════════════════ */
+  decorate();
+  fit();
+  buildTitle();
+  setScene('title');
+  S.last = Date.now(); save();
+  if (!clearedCount() && !S.run) setTimeout(function () { if (scene === 'title') amos(pick(AMOS.hello, 'hello'), 'key', 6000); }, 1200);
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
